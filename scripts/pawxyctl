@@ -1,0 +1,250 @@
+#!/bin/sh
+set -u
+
+PKG=dev.pawxy
+SERVICE=dev.pawxy/.ProxyService
+STATUS_URI_BASE=content://dev.pawxy.status/status
+
+ACTION_START=dev.pawxy.action.START
+ACTION_STOP=dev.pawxy.action.STOP
+ACTION_RESTART=dev.pawxy.action.RESTART
+ACTION_WAKE_ON=dev.pawxy.action.WAKE_ON
+ACTION_WAKE_OFF=dev.pawxy.action.WAKE_OFF
+
+DEFAULT_LISTEN=127.0.0.1:7890
+LAN_LISTEN=0.0.0.0:7890
+
+die() {
+  printf '%s\n' "pawxyctl: $*" >&2
+  exit 1
+}
+
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+pick_home() {
+  if [ -n "${PAWXY_HOME:-}" ]; then
+    printf '%s\n' "$PAWXY_HOME"
+  elif [ -n "${HOME:-}" ] && [ -d "$HOME" ] && [ -w "$HOME" ]; then
+    printf '%s\n' "$HOME/.config/pawxy"
+  else
+    printf '%s\n' "/data/local/tmp/pawxy"
+  fi
+}
+
+PAWXY_DIR=$(pick_home)
+if ! mkdir -p "$PAWXY_DIR" 2>/dev/null; then
+  PAWXY_DIR=/data/local/tmp/pawxy
+  mkdir -p "$PAWXY_DIR" || die "cannot create $PAWXY_DIR"
+fi
+TOKEN_FILE=$PAWXY_DIR/token
+CONFIG_FILE=$PAWXY_DIR/config.env
+
+random_hex() {
+  if has_cmd od; then
+    od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n'
+  elif has_cmd hexdump; then
+    hexdump -n 32 -e '32/1 "%02x"' /dev/urandom 2>/dev/null
+  else
+    date +%s | tr -d '\n'
+  fi
+}
+
+ensure_token() {
+  if [ -s "$TOKEN_FILE" ]; then
+    sed -n '1p' "$TOKEN_FILE"
+    return
+  fi
+  token=$(random_hex)
+  [ -n "$token" ] || die "could not generate control token"
+  umask 077
+  printf '%s\n' "$token" > "$TOKEN_FILE" || die "cannot write token file"
+  printf '%s\n' "$token"
+}
+
+load_lan_password() {
+  LAN_PASSWORD=
+  if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+  fi
+  if [ -n "${LAN_PASSWORD:-}" ]; then
+    printf '%s\n' "$LAN_PASSWORD"
+    return
+  fi
+  LAN_PASSWORD=$(random_hex | cut -c 1-32)
+  umask 077
+  printf 'LAN_PASSWORD=%s\n' "$LAN_PASSWORD" > "$CONFIG_FILE" || die "cannot write config file"
+  printf '%s\n' "$LAN_PASSWORD"
+}
+
+need_android_cmds() {
+  has_cmd am || die "am command not found"
+}
+
+start_service() {
+  action=$1
+  listen=$2
+  lan=$3
+  auth_enabled=$4
+  username=${5:-}
+  password=${6:-}
+  token=$(ensure_token)
+  need_android_cmds
+
+  cmd="am start-foreground-service -n \"$SERVICE\" -a \"$action\" --es token \"$token\" --es listen \"$listen\" --ez lan $lan --ez auth_enabled $auth_enabled --ei max_connections 256 --ei max_per_source_ip 64 --el handshake_timeout_ms 5000 --el connect_timeout_ms 10000 --el idle_timeout_ms 1800000"
+  if [ "$auth_enabled" = "true" ]; then
+    [ -n "$password" ] || die "LAN auth password is empty"
+    cmd="$cmd --es username \"$username\" --es password \"$password\""
+  fi
+  eval "$cmd"
+}
+
+send_simple_action() {
+  action=$1
+  token=$(ensure_token)
+  need_android_cmds
+  am start-foreground-service -n "$SERVICE" -a "$action" --es token "$token"
+}
+
+status_json() {
+  token=$(ensure_token)
+  if ! has_cmd content; then
+    printf '%s\n' '{"ok":false,"error":"content command not found"}'
+    return
+  fi
+  output=$(content query --uri "$STATUS_URI_BASE/$token" 2>/dev/null || true)
+  json=$(printf '%s\n' "$output" | sed -n 's/^.*json=//p' | tail -n 1)
+  if [ -n "$json" ]; then
+    printf '%s\n' "$json"
+  else
+    printf '%s\n' '{"ok":false,"error":"status unavailable"}'
+  fi
+}
+
+json_get() {
+  key=$1
+  sed -n 's/.*"'"$key"'":\("[^"]*"\|[^,}]*\).*/\1/p' | sed 's/^"//;s/"$//'
+}
+
+print_status() {
+  json=$(status_json)
+  if [ "${1:-}" = "--json" ]; then
+    printf '%s\n' "$json"
+    return
+  fi
+
+  running=$(printf '%s' "$json" | json_get running)
+  listen=$(printf '%s' "$json" | json_get listen)
+  lan=$(printf '%s' "$json" | json_get lan)
+  auth=$(printf '%s' "$json" | json_get auth_enabled)
+  active=$(printf '%s' "$json" | json_get active_connections)
+  total=$(printf '%s' "$json" | json_get total_connections)
+  bytes_in=$(printf '%s' "$json" | json_get bytes_in)
+  bytes_out=$(printf '%s' "$json" | json_get bytes_out)
+  wake=$(printf '%s' "$json" | json_get wake_lock_enabled)
+  last_error=$(printf '%s' "$json" | json_get last_error)
+
+  if [ "$running" = "true" ]; then state=running; else state=stopped; fi
+  if [ "$lan" = "true" ]; then lan_state=on; else lan_state=off; fi
+  if [ "$auth" = "true" ]; then auth_state=on; else auth_state=off; fi
+  if [ "$wake" = "true" ]; then wake_state=on; else wake_state=off; fi
+
+  printf 'pawxy: %s\n' "$state"
+  printf 'listen: %s\n' "${listen:-unknown}"
+  printf 'mixed: http + socks5\n'
+  printf 'lan: %s\n' "$lan_state"
+  printf 'auth: %s\n' "$auth_state"
+  printf 'active: %s\n' "${active:-0}"
+  printf 'total: %s\n' "${total:-0}"
+  printf 'bytes: %s/%s\n' "${bytes_in:-0}" "${bytes_out:-0}"
+  printf 'wake-lock: %s\n' "$wake_state"
+  printf 'last-error: %s\n' "${last_error:-null}"
+}
+
+doctor() {
+  printf 'package installed: '
+  if has_cmd pm && pm path "$PKG" >/dev/null 2>&1; then printf 'yes\n'; else printf 'no\n'; fi
+  printf 'am: '
+  if has_cmd am; then printf 'found\n'; else printf 'missing\n'; fi
+  printf 'content: '
+  if has_cmd content; then printf 'found\n'; else printf 'missing\n'; fi
+  printf 'token: %s\n' "$TOKEN_FILE"
+  if has_cmd pm; then
+    perm=$(pm check-permission android.permission.POST_NOTIFICATIONS "$PKG" 2>/dev/null || true)
+    [ -n "$perm" ] && printf 'notification permission: %s\n' "$perm"
+  fi
+  printf 'status:\n'
+  print_status | sed 's/^/  /'
+  wake=$(status_json | json_get wake_lock_enabled)
+  if [ "$wake" = "true" ]; then wake_state=enabled; else wake_state=disabled; fi
+  printf 'wake lock according to status: %s\n' "$wake_state"
+  printf 'notes:\n'
+  printf '  - Pawxy has no UI. Start it with pawxyctl.\n'
+  printf '  - LAN mode always requires auth.\n'
+}
+
+usage() {
+  cat <<'USAGE'
+usage:
+  pawxyctl start
+  pawxyctl stop
+  pawxyctl restart
+  pawxyctl status [--json]
+  pawxyctl logs
+  pawxyctl share on|off
+  pawxyctl wake on|off
+  pawxyctl doctor
+USAGE
+}
+
+cmd=${1:-}
+case "$cmd" in
+  start)
+    start_service "$ACTION_START" "$DEFAULT_LISTEN" false false
+    ;;
+  stop)
+    send_simple_action "$ACTION_STOP"
+    ;;
+  restart)
+    start_service "$ACTION_RESTART" "$DEFAULT_LISTEN" false false
+    ;;
+  status)
+    print_status "${2:-}"
+    ;;
+  logs)
+    has_cmd logcat || die "logcat command not found"
+    logcat -s Pawxy PawxyNative
+    ;;
+  share)
+    case "${2:-}" in
+      on)
+        password=$(load_lan_password)
+        start_service "$ACTION_START" "$LAN_LISTEN" true true pawxy "$password"
+        printf 'LAN sharing enabled with username pawxy and password stored in %s\n' "$CONFIG_FILE"
+        ;;
+      off)
+        start_service "$ACTION_START" "$DEFAULT_LISTEN" false false
+        ;;
+      *)
+        usage
+        exit 1
+        ;;
+    esac
+    ;;
+  wake)
+    case "${2:-}" in
+      on) send_simple_action "$ACTION_WAKE_ON" ;;
+      off) send_simple_action "$ACTION_WAKE_OFF" ;;
+      *) usage; exit 1 ;;
+    esac
+    ;;
+  doctor)
+    doctor
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
