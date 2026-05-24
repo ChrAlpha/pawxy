@@ -27,6 +27,12 @@ scripts/build-android.sh
 scripts/install-apk-adb.sh
 ```
 
+Start after install:
+
+```sh
+adb shell /data/local/tmp/pawxyctl start
+```
+
 GitHub packaging is also available from Actions:
 
 - Run **Package Android** manually to download APK, `pawxyctl`, and checksums as
