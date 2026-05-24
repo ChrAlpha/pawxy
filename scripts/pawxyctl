@@ -47,7 +47,7 @@ random_hex() {
   elif has_cmd hexdump; then
     hexdump -n 32 -e '32/1 "%02x"' /dev/urandom 2>/dev/null
   else
-    date +%s | tr -d '\n'
+    return 1
   fi
 }
 
@@ -66,10 +66,12 @@ ensure_token() {
 load_lan_password() {
   LAN_PASSWORD=
   if [ -f "$CONFIG_FILE" ]; then
-    # shellcheck disable=SC1090
-    . "$CONFIG_FILE"
+    LAN_PASSWORD=$(sed -n 's/^LAN_PASSWORD=//p' "$CONFIG_FILE" | sed -n '1p')
   fi
-  if [ -n "${LAN_PASSWORD:-}" ]; then
+  case "$LAN_PASSWORD" in
+    ''|*[!0123456789abcdefABCDEF]*) LAN_PASSWORD= ;;
+  esac
+  if [ -n "$LAN_PASSWORD" ]; then
     printf '%s\n' "$LAN_PASSWORD"
     return
   fi
@@ -93,12 +95,36 @@ start_service() {
   token=$(ensure_token)
   need_android_cmds
 
-  cmd="am start-foreground-service -n \"$SERVICE\" -a \"$action\" --es token \"$token\" --es listen \"$listen\" --ez lan $lan --ez auth_enabled $auth_enabled --ei max_connections 256 --ei max_per_source_ip 64 --el handshake_timeout_ms 5000 --el connect_timeout_ms 10000 --el idle_timeout_ms 1800000"
   if [ "$auth_enabled" = "true" ]; then
     [ -n "$password" ] || die "LAN auth password is empty"
-    cmd="$cmd --es username \"$username\" --es password \"$password\""
+    am start-foreground-service \
+      -n "$SERVICE" \
+      -a "$action" \
+      --es token "$token" \
+      --es listen "$listen" \
+      --ez lan "$lan" \
+      --ez auth_enabled "$auth_enabled" \
+      --ei max_connections 256 \
+      --ei max_per_source_ip 64 \
+      --el handshake_timeout_ms 5000 \
+      --el connect_timeout_ms 10000 \
+      --el idle_timeout_ms 1800000 \
+      --es username "$username" \
+      --es password "$password"
+  else
+    am start-foreground-service \
+      -n "$SERVICE" \
+      -a "$action" \
+      --es token "$token" \
+      --es listen "$listen" \
+      --ez lan "$lan" \
+      --ez auth_enabled "$auth_enabled" \
+      --ei max_connections 256 \
+      --ei max_per_source_ip 64 \
+      --el handshake_timeout_ms 5000 \
+      --el connect_timeout_ms 10000 \
+      --el idle_timeout_ms 1800000
   fi
-  eval "$cmd"
 }
 
 send_simple_action() {
@@ -144,6 +170,9 @@ print_status() {
   bytes_in=$(printf '%s' "$json" | json_get bytes_in)
   bytes_out=$(printf '%s' "$json" | json_get bytes_out)
   wake=$(printf '%s' "$json" | json_get wake_lock_enabled)
+  network_available=$(printf '%s' "$json" | json_get network_available)
+  network_transport=$(printf '%s' "$json" | json_get network_transport)
+  network_generation=$(printf '%s' "$json" | json_get network_generation)
   last_error=$(printf '%s' "$json" | json_get last_error)
 
   if [ "$running" = "true" ]; then state=running; else state=stopped; fi
@@ -160,6 +189,7 @@ print_status() {
   printf 'total: %s\n' "${total:-0}"
   printf 'bytes: %s/%s\n' "${bytes_in:-0}" "${bytes_out:-0}"
   printf 'wake-lock: %s\n' "$wake_state"
+  printf 'network: %s/%s gen=%s\n' "${network_available:-false}" "${network_transport:-unknown}" "${network_generation:-0}"
   printf 'last-error: %s\n' "${last_error:-null}"
 }
 
@@ -180,6 +210,11 @@ doctor() {
   wake=$(status_json | json_get wake_lock_enabled)
   if [ "$wake" = "true" ]; then wake_state=enabled; else wake_state=disabled; fi
   printf 'wake lock according to status: %s\n' "$wake_state"
+  network=$(status_json)
+  network_available=$(printf '%s' "$network" | json_get network_available)
+  network_transport=$(printf '%s' "$network" | json_get network_transport)
+  network_generation=$(printf '%s' "$network" | json_get network_generation)
+  printf 'network according to status: %s/%s gen=%s\n' "${network_available:-false}" "${network_transport:-unknown}" "${network_generation:-0}"
   printf 'notes:\n'
   printf '  - Pawxy has no UI. Start it with pawxyctl.\n'
   printf '  - LAN mode always requires auth.\n'

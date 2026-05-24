@@ -27,6 +27,13 @@ scripts/build-android.sh
 scripts/install-apk-adb.sh
 ```
 
+GitHub packaging is also available from Actions:
+
+- Run **Package Android** manually to download APK, `pawxyctl`, and checksums as
+  a workflow artifact.
+- Publish a GitHub Release to build the same files and attach them to the
+  release automatically.
+
 ## CLI
 
 The Android service is controlled with `scripts/pawxyctl`, which can run from

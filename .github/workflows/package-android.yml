@@ -1,0 +1,139 @@
+name: Package Android
+
+on:
+  workflow_dispatch:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+
+jobs:
+  package-android:
+    name: Build Android package
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      ANDROID_NDK_VERSION: "27.2.12479018"
+      CARGO_NDK_VERSION: "4.1.2"
+      APK_SOURCE: android/app/build/outputs/apk/debug/app-debug.apk
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Cache Rust build inputs
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-ndk
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ env.CARGO_NDK_VERSION }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ env.CARGO_NDK_VERSION }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Prepare Android SDK and NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "${SDKMANAGER}" --licenses >/dev/null || true
+          "${SDKMANAGER}" "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "${GITHUB_ENV}"
+
+      - name: Prepare Rust Android targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add \
+            aarch64-linux-android \
+            armv7-linux-androideabi \
+            x86_64-linux-android
+          if ! cargo ndk --version | grep -F "cargo-ndk ${CARGO_NDK_VERSION}" >/dev/null 2>&1; then
+            cargo install cargo-ndk --version "${CARGO_NDK_VERSION}" --locked
+          fi
+
+      - name: Verify source gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          sh -n scripts/pawxyctl
+          sh -n scripts/build-android.sh
+          sh -n scripts/install-apk-adb.sh
+          sh -n scripts/check-best-practices.sh
+          scripts/check-best-practices.sh
+
+      - name: Build Android APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/build-android.sh
+
+      - name: Assemble package files
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME:-manual}"
+          safe_version="$(printf '%s' "${version}" | tr -c 'A-Za-z0-9._-' '-')"
+          mkdir -p dist
+          cp "${APK_SOURCE}" "dist/pawxy-${safe_version}-debug.apk"
+          cp scripts/pawxyctl "dist/pawxyctl"
+          chmod 755 "dist/pawxyctl"
+          (
+            cd dist
+            sha256sum "pawxy-${safe_version}-debug.apk" pawxyctl > SHA256SUMS
+          )
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: pawxy-android-package
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  upload-release-assets:
+    name: Upload release assets
+    if: github.event_name == 'release'
+    needs:
+      - package-android
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Download packaged files
+        uses: actions/download-artifact@v8
+        with:
+          name: pawxy-android-package
+          path: dist
+
+      - name: Upload release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "${RELEASE_TAG}" dist/* --clobber

@@ -39,6 +39,9 @@ class StatusProvider : ContentProvider() {
         nativeJson
             .put("wake_lock_enabled", prefs.getBoolean(ProxyService.KEY_WAKE_LOCK_ENABLED, false))
             .put("service_started", prefs.getBoolean(ProxyService.KEY_SERVICE_STARTED, false))
+            .put("network_available", prefs.getBoolean(ProxyService.KEY_NETWORK_AVAILABLE, false))
+            .put("network_transport", prefs.getString(ProxyService.KEY_NETWORK_TRANSPORT, "unknown"))
+            .put("network_generation", prefs.getLong(ProxyService.KEY_NETWORK_GENERATION, 0L))
             .put("listen", prefs.getString(ProxyService.KEY_LISTEN, nativeJson.optString("listen")))
             .put("lan", prefs.getBoolean(ProxyService.KEY_LAN, nativeJson.optBoolean("lan", false)))
             .put(

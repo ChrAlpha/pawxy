@@ -3,6 +3,9 @@ package dev.pawxy
 import android.app.Service
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
@@ -13,12 +16,15 @@ class ProxyService : Service() {
     private lateinit var controlToken: ControlToken
     private lateinit var notificationHelper: NotificationHelper
     private var wakeLock: PowerManager.WakeLock? = null
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun onCreate() {
         super.onCreate()
         prefs = getSharedPreferences(ControlToken.PREFS, MODE_PRIVATE)
         controlToken = ControlToken(this)
         notificationHelper = NotificationHelper(this)
+        registerDefaultNetworkCallback()
         if (prefs.getBoolean(KEY_WAKE_LOCK_ENABLED, false)) {
             setWakeLock(true)
         }
@@ -70,6 +76,7 @@ class ProxyService : Service() {
     }
 
     override fun onDestroy() {
+        unregisterNetworkCallback()
         PawxyNative.nativeStop()
         setWakeLock(false)
         super.onDestroy()
@@ -180,6 +187,70 @@ class ProxyService : Service() {
         return listen.startsWith("0.0.0.0:") || listen.startsWith("[::]:") || listen.startsWith(":::")
     }
 
+    private fun registerDefaultNetworkCallback() {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        connectivityManager = manager
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                updateNetworkState(true, manager.getNetworkCapabilities(network))
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                updateNetworkState(true, capabilities)
+            }
+
+            override fun onLost(network: Network) {
+                val activeNetwork = manager.activeNetwork
+                val capabilities = activeNetwork?.let { manager.getNetworkCapabilities(it) }
+                updateNetworkState(activeNetwork != null, capabilities)
+            }
+        }
+
+        try {
+            manager.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+            val activeNetwork = manager.activeNetwork
+            val capabilities = activeNetwork?.let { manager.getNetworkCapabilities(it) }
+            updateNetworkState(activeNetwork != null, capabilities)
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Could not observe default network", error)
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val manager = connectivityManager ?: return
+        val callback = networkCallback ?: return
+        try {
+            manager.unregisterNetworkCallback(callback)
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Could not unregister default network callback", error)
+        } finally {
+            networkCallback = null
+        }
+    }
+
+    private fun updateNetworkState(available: Boolean, capabilities: NetworkCapabilities?) {
+        val transport = networkTransport(capabilities)
+        val nextGeneration = prefs.getLong(KEY_NETWORK_GENERATION, 0L) + 1L
+        prefs.edit()
+            .putBoolean(KEY_NETWORK_AVAILABLE, available)
+            .putString(KEY_NETWORK_TRANSPORT, transport)
+            .putLong(KEY_NETWORK_GENERATION, nextGeneration)
+            .apply()
+        Log.i(TAG, "Default network changed: available=$available transport=$transport generation=$nextGeneration")
+    }
+
+    private fun networkTransport(capabilities: NetworkCapabilities?): String {
+        if (capabilities == null) return "none"
+        val transports = mutableListOf<String>()
+        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) transports.add("vpn")
+        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) transports.add("wifi")
+        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) transports.add("cellular")
+        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) transports.add("ethernet")
+        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)) transports.add("bluetooth")
+        return if (transports.isEmpty()) "other" else transports.joinToString(",")
+    }
+
     companion object {
         private const val TAG = "Pawxy"
         const val ACTION_START = "dev.pawxy.action.START"
@@ -206,6 +277,9 @@ class ProxyService : Service() {
         const val KEY_AUTH_ENABLED = "auth_enabled"
         const val KEY_WAKE_LOCK_ENABLED = "wake_lock_enabled"
         const val KEY_SERVICE_STARTED = "service_started"
+        const val KEY_NETWORK_AVAILABLE = "network_available"
+        const val KEY_NETWORK_TRANSPORT = "network_transport"
+        const val KEY_NETWORK_GENERATION = "network_generation"
         const val DEFAULT_LISTEN = "127.0.0.1:7890"
     }
 }
