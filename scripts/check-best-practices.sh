@@ -11,13 +11,13 @@ fail() {
 contains() {
   file=$1
   text=$2
-  grep -F "$text" "$file" >/dev/null 2>&1
+  grep -F -- "$text" "$file" >/dev/null 2>&1
 }
 
 not_contains() {
   file=$1
   text=$2
-  ! grep -F "$text" "$file" >/dev/null 2>&1
+  ! grep -F -- "$text" "$file" >/dev/null 2>&1
 }
 
 MANIFEST=$ROOT/android/app/src/main/AndroidManifest.xml
@@ -77,6 +77,8 @@ contains "$WORKFLOW" "actions/upload-artifact@v7" \
   || fail "Packaging workflow must upload workflow artifacts"
 contains "$WORKFLOW" "gh release upload" \
   || fail "Packaging workflow must upload assets to GitHub releases"
+contains "$WORKFLOW" '--repo "${GITHUB_REPOSITORY}"' \
+  || fail "Packaging workflow release upload must be explicit about the repository without checkout"
 
 contains "$BEST_PRACTICES" "Never retry an established TCP tunnel transparently" \
   || fail "best-practice doc must forbid transparent TCP tunnel retry"

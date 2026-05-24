@@ -255,6 +255,8 @@ The workflow MUST:
   job that downloads the workflow artifact.
 - Use `GITHUB_TOKEN` with `contents: write` only in the release asset upload
   job.
+- Pass `--repo "${GITHUB_REPOSITORY}"` to `gh release upload`, because the
+  upload job intentionally does not check out the repository.
 - Track current official GitHub action major tags in the best-practice checker
   when the workflow is updated.
 

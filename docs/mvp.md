@@ -909,7 +909,8 @@ The workflow MUST:
     - depends on the package job.
     - downloads the packaged workflow artifact.
     - explicitly requests `contents: write`.
-    - uploads `dist/*` to the GitHub Release.
+    - uploads `dist/*` to the GitHub Release with an explicit
+      `--repo "${GITHUB_REPOSITORY}"` argument.
 
 Until signing keys and release-channel policy exist, the workflow MUST package
 the debug APK produced by the MVP build script. Release signing is a separate
