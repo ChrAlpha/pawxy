@@ -24,6 +24,7 @@ MANIFEST=$ROOT/android/app/src/main/AndroidManifest.xml
 SERVICE=$ROOT/android/app/src/main/java/dev/pawxy/ProxyService.kt
 PROVIDER=$ROOT/android/app/src/main/java/dev/pawxy/StatusProvider.kt
 CTL=$ROOT/scripts/pawxyctl
+INSTALLER=$ROOT/scripts/install-android.sh
 BEST_PRACTICES=$ROOT/docs/best-practices.md
 
 contains "$MANIFEST" "android.permission.ACCESS_NETWORK_STATE" \
@@ -53,6 +54,16 @@ not_contains "$CTL" "date +%s" \
 [ -f "$ROOT/android/gradle/wrapper/gradle-wrapper.jar" ] \
   || fail "Android project must include gradle-wrapper.jar"
 
+[ -f "$INSTALLER" ] || fail "Android install-and-start script must exist"
+contains "$INSTALLER" "pm install -r" \
+  || fail "Android installer must install the APK with pm install -r"
+contains "$INSTALLER" "sha256sum -c" \
+  || fail "Android installer must verify release downloads"
+contains "$INSTALLER" '"$INSTALL_DIR/$CTL" start' \
+  || fail "Android installer must start through installed pawxyctl"
+contains "$INSTALLER" "PAWXY_GITHUB_TOKEN" \
+  || fail "Android installer must support private release token downloads"
+
 WORKFLOW=$ROOT/.github/workflows/package-android.yml
 [ -f "$WORKFLOW" ] || fail "GitHub Actions Android packaging workflow must exist"
 contains "$WORKFLOW" "workflow_dispatch:" \
@@ -73,6 +84,8 @@ contains "$WORKFLOW" "actions/download-artifact@v8" \
   || fail "Packaging workflow must download artifacts in the release upload job"
 contains "$WORKFLOW" "scripts/build-android.sh" \
   || fail "Packaging workflow must use the repository Android build script"
+contains "$WORKFLOW" "scripts/install-android.sh" \
+  || fail "Packaging workflow must verify and package the Android install script"
 contains "$WORKFLOW" "actions/upload-artifact@v7" \
   || fail "Packaging workflow must upload workflow artifacts"
 contains "$WORKFLOW" "gh release upload" \
@@ -86,5 +99,7 @@ contains "$BEST_PRACTICES" 'Do not bind outbound sockets to a specific Android `
   || fail "best-practice doc must forbid binding outbound sockets to a captured Android Network"
 contains "$BEST_PRACTICES" "Wake lock is opt-in only" \
   || fail "best-practice doc must document opt-in wake lock semantics"
+contains "$BEST_PRACTICES" "install-and-start, not no-install startup" \
+  || fail "best-practice doc must document install-and-start wording"
 
 printf '%s\n' "best-practice contract ok"

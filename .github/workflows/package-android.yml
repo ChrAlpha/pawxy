@@ -78,7 +78,10 @@ jobs:
           sh -n scripts/pawxyctl
           sh -n scripts/build-android.sh
           sh -n scripts/install-apk-adb.sh
+          sh -n scripts/install-android.sh
+          sh -n scripts/test-install-android.sh
           sh -n scripts/check-best-practices.sh
+          scripts/test-install-android.sh
           scripts/check-best-practices.sh
 
       - name: Build Android APK
@@ -96,7 +99,9 @@ jobs:
           mkdir -p dist
           cp "${APK_SOURCE}" "dist/pawxy-${safe_version}-debug.apk"
           cp scripts/pawxyctl "dist/pawxyctl"
+          cp scripts/install-android.sh "dist/install-android.sh"
           chmod 755 "dist/pawxyctl"
+          chmod 755 "dist/install-android.sh"
           (
             cd dist
             sha256sum "pawxy-${safe_version}-debug.apk" pawxyctl > SHA256SUMS

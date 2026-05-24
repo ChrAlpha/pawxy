@@ -235,7 +235,30 @@ available:
 The script MUST prefer `android/gradlew` over a globally installed `gradle`
 command.
 
-### 3.4.1 GitHub Actions Packaging
+### 3.4.1 Android One-Command Install
+
+The repository SHOULD provide `scripts/install-android.sh` as the user-facing
+Android install-and-start path:
+
+```sh
+curl -fsSL https://github.com/ChrAlpha/pawxy/releases/latest/download/install-android.sh | sh
+```
+
+This command MUST be described as install-and-start, not no-install startup.
+Android Foreground Service registration, manifest permissions, notification
+behavior, and package identity require APK installation.
+
+The script MUST:
+
+- Remain POSIX shell.
+- Download the release APK, `pawxyctl`, and `SHA256SUMS`.
+- Verify release downloads before installing.
+- Install with `pm install -r`.
+- Copy `pawxyctl` to `/data/local/tmp/pawxyctl` by default.
+- Start Pawxy through `pawxyctl start`.
+- Support a token environment variable for private release downloads.
+
+### 3.4.2 GitHub Actions Packaging
 
 The repository MUST include a manual and release-triggered Android packaging
 workflow at `.github/workflows/package-android.yml`.
@@ -249,7 +272,8 @@ The workflow MUST:
   cost.
 - Build through `scripts/build-android.sh`.
 - Run source verification gates before packaging.
-- Upload APK, `pawxyctl`, and `SHA256SUMS` as a workflow artifact.
+- Upload APK, `pawxyctl`, `install-android.sh`, and `SHA256SUMS` as a workflow
+  artifact. `SHA256SUMS` MUST cover the APK and `pawxyctl` installation inputs.
 - Keep the build/package job at read-only repository permission.
 - Upload the same files to the GitHub Release on release events from a separate
   job that downloads the workflow artifact.

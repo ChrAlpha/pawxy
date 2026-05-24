@@ -874,6 +874,25 @@ android/app/build/outputs/apk/debug/app-debug.apk
 2. Push `scripts/pawxyctl` to `/data/local/tmp/pawxyctl`.
 3. Print example `adb shell /data/local/tmp/pawxyctl ...` commands.
 
+`scripts/install-android.sh` MUST:
+
+1. Be POSIX shell and run on Android shell environments with `curl` or `wget`.
+2. Download release assets:
+   - `pawxy-<version>-debug.apk`
+   - `pawxyctl`
+   - `SHA256SUMS`
+3. Accept `PAWXY_VERSION` to override the default release version.
+4. Accept `PAWXY_REPO` to override the GitHub repository.
+5. Accept `PAWXY_GITHUB_TOKEN`, `GITHUB_PERSONAL_ACCESS_TOKEN`, or
+   `GITHUB_TOKEN` for private release downloads.
+6. Verify downloaded files with `sha256sum -c SHA256SUMS` before installing.
+7. Install the APK with `pm install -r`.
+8. Copy `pawxyctl` to `/data/local/tmp/pawxyctl` by default.
+9. Start Pawxy with the installed `pawxyctl start`.
+
+This script is an install-and-start path. It MUST NOT claim that Android APK
+installation can be skipped.
+
 ### 8.4 GitHub Actions Packaging
 
 `.github/workflows/package-android.yml` MUST package Android artifacts when:
@@ -902,7 +921,8 @@ The workflow MUST:
 9. Assemble `dist/` with:
    - debug APK named for the ref.
    - `pawxyctl`.
-   - `SHA256SUMS`.
+   - `install-android.sh`.
+   - `SHA256SUMS` covering the APK and `pawxyctl` installation inputs.
 10. Upload `dist/*` as a workflow artifact.
 11. Keep the build/package job at read-only repository permission.
 12. On release events, run a separate upload job that:

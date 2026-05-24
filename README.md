@@ -27,16 +27,16 @@ scripts/build-android.sh
 scripts/install-apk-adb.sh
 ```
 
-Start after install:
+Install and start on Android in one command:
 
 ```sh
-adb shell /data/local/tmp/pawxyctl start
+curl -fsSL https://github.com/ChrAlpha/pawxy/releases/latest/download/install-android.sh | sh
 ```
 
 GitHub packaging is also available from Actions:
 
-- Run **Package Android** manually to download APK, `pawxyctl`, and checksums as
-  a workflow artifact.
+- Run **Package Android** manually to download APK, `pawxyctl`,
+  `install-android.sh`, and checksums as a workflow artifact.
 - Publish a GitHub Release to build the same files and attach them to the
   release automatically.
 
