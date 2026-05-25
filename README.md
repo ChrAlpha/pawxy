@@ -16,7 +16,7 @@ Rust local checks:
 
 ```sh
 cargo test -p pawxy-core
-cargo run -p pawxy-cli -- serve --listen 127.0.0.1:7890
+cargo run -p pawxy-cli -- serve --listen 127.0.0.1:3218
 ```
 
 Android debug APK:
@@ -65,27 +65,27 @@ pawxyctl stop
 Defaults are local-only and unauthenticated:
 
 ```text
-listen = 127.0.0.1:7890
+listen = 127.0.0.1:3218
 auth = off
 max_connections = 256
 max_per_source_ip = 64
 ```
 
-LAN sharing uses `0.0.0.0:7890`, forces authentication, and stores the generated
+LAN sharing uses `0.0.0.0:3218`, forces authentication, and stores the generated
 password in `${PAWXY_HOME:-$HOME/.config/pawxy}/config.env` or
 `/data/local/tmp/pawxy/config.env` when `$HOME` is unavailable.
 
 ## Test Traffic
 
 ```sh
-curl -x http://127.0.0.1:7890 http://example.com
-curl -x http://127.0.0.1:7890 https://example.com
-curl --socks5-hostname 127.0.0.1:7890 https://example.com
+curl -x http://127.0.0.1:3218 http://example.com
+curl -x http://127.0.0.1:3218 https://example.com
+curl --socks5-hostname 127.0.0.1:3218 https://example.com
 ```
 
 ## Security Defaults
 
-Local mode binds `127.0.0.1:7890` with auth off. LAN mode always requires proxy
+Local mode binds `127.0.0.1:3218` with auth off. LAN mode always requires proxy
 auth, and core config validation rejects `0.0.0.0` or `::` without auth.
 
 The foreground service keeps Pawxy visible to Android. Wake lock is optional via

@@ -268,7 +268,7 @@ tcp_keepalive: bool
 Defaults MUST be:
 
 ```text
-listen = 127.0.0.1:7890
+listen = 127.0.0.1:3218
 auth = None
 max_connections = 256
 max_per_source_ip = 64
@@ -725,7 +725,7 @@ pawxyctl doctor
 `pawxyctl start` MUST start local-only mode:
 
 ```text
-listen = 127.0.0.1:7890
+listen = 127.0.0.1:3218
 auth_enabled = false
 max_connections = 256
 max_per_source_ip = 64
@@ -740,7 +740,7 @@ wake_lock = unchanged/off by default
 `pawxyctl share on` MUST start or restart with:
 
 ```text
-listen = 0.0.0.0:7890
+listen = 0.0.0.0:3218
 lan = true
 auth_enabled = true
 username = pawxy
@@ -751,7 +751,7 @@ wake_lock = unchanged
 `pawxyctl share off` MUST start or restart with:
 
 ```text
-listen = 127.0.0.1:7890
+listen = 127.0.0.1:3218
 lan = false
 auth_enabled = false
 ```
@@ -953,8 +953,8 @@ used by Android runtime.
 It MUST support:
 
 ```sh
-pawxy-cli serve --listen 127.0.0.1:7890
-pawxy-cli serve --listen 0.0.0.0:7890 --auth pawxy:pass
+pawxy-cli serve --listen 127.0.0.1:3218
+pawxy-cli serve --listen 0.0.0.0:3218 --auth pawxy:pass
 ```
 
 It MUST call `pawxy-core` directly.
@@ -979,9 +979,9 @@ README MUST document:
 - Test traffic examples:
 
 ```sh
-curl -x http://127.0.0.1:7890 http://example.com
-curl -x http://127.0.0.1:7890 https://example.com
-curl --socks5-hostname 127.0.0.1:7890 https://example.com
+curl -x http://127.0.0.1:3218 http://example.com
+curl -x http://127.0.0.1:3218 https://example.com
+curl --socks5-hostname 127.0.0.1:3218 https://example.com
 ```
 
 - Security defaults:
@@ -1085,8 +1085,8 @@ The MVP is accepted only when current evidence proves:
 - HTTP CONNECT works.
 - HTTP absolute-form forwarding works.
 - SOCKS5 CONNECT works.
-- Local-only mode defaults to `127.0.0.1:7890` with no auth.
-- LAN mode binds `0.0.0.0:7890` and always requires auth.
+- Local-only mode defaults to `127.0.0.1:3218` with no auth.
+- LAN mode binds `0.0.0.0:3218` and always requires auth.
 - Wildcard listen without auth is impossible through CLI, service, and native
   validation.
 - Android default-network changes are visible in status/logs.

@@ -19,13 +19,13 @@ async fn run() -> Result<(), String> {
     match args.next().as_deref() {
         Some("serve") => serve(args.collect()).await,
         _ => {
-            Err("usage: pawxy-cli serve --listen 127.0.0.1:7890 [--auth username:password]".into())
+            Err("usage: pawxy-cli serve --listen 127.0.0.1:3218 [--auth username:password]".into())
         }
     }
 }
 
 async fn serve(args: Vec<String>) -> Result<(), String> {
-    let mut listen: SocketAddr = "127.0.0.1:7890"
+    let mut listen: SocketAddr = "127.0.0.1:3218"
         .parse()
         .expect("valid built-in listen address");
     let mut auth = None;

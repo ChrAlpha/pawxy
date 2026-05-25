@@ -27,7 +27,7 @@ pub struct PawxyConfig {
 impl Default for PawxyConfig {
     fn default() -> Self {
         Self {
-            listen: "127.0.0.1:7890".parse().expect("valid default listen"),
+            listen: "127.0.0.1:3218".parse().expect("valid default listen"),
             auth: None,
             max_connections: 256,
             max_per_source_ip: 64,
@@ -113,5 +113,18 @@ impl PawxyConfigJson {
         }
         config.validate()?;
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PawxyConfig;
+
+    #[test]
+    fn default_listen_avoids_common_mihomo_port() {
+        let default_listen = PawxyConfig::default().listen;
+
+        assert_eq!(default_listen.to_string(), "127.0.0.1:3218");
+        assert_ne!(default_listen.port(), 7890);
     }
 }

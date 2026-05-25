@@ -280,6 +280,6 @@ class ProxyService : Service() {
         const val KEY_NETWORK_AVAILABLE = "network_available"
         const val KEY_NETWORK_TRANSPORT = "network_transport"
         const val KEY_NETWORK_GENERATION = "network_generation"
-        const val DEFAULT_LISTEN = "127.0.0.1:7890"
+        const val DEFAULT_LISTEN = "127.0.0.1:3218"
     }
 }

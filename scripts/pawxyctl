@@ -11,8 +11,8 @@ ACTION_RESTART=dev.pawxy.action.RESTART
 ACTION_WAKE_ON=dev.pawxy.action.WAKE_ON
 ACTION_WAKE_OFF=dev.pawxy.action.WAKE_OFF
 
-DEFAULT_LISTEN=127.0.0.1:7890
-LAN_LISTEN=0.0.0.0:7890
+DEFAULT_LISTEN=127.0.0.1:3218
+LAN_LISTEN=0.0.0.0:3218
 
 die() {
   printf '%s\n' "pawxyctl: $*" >&2

@@ -260,7 +260,7 @@ async fn oversized_http_headers_are_rejected() {
 #[test]
 fn lan_listen_without_auth_is_rejected_by_config_validation() {
     let config = PawxyConfig {
-        listen: "0.0.0.0:7890".parse().expect("listen"),
+        listen: "0.0.0.0:3218".parse().expect("listen"),
         ..PawxyConfig::default()
     };
 
