@@ -14,7 +14,7 @@ sh -n "$SCRIPT"
 
 tmp=${TMPDIR:-/tmp}/pawxy-install-test.$$
 rm -rf "$tmp"
-mkdir -p "$tmp/bin" "$tmp/log" "$tmp/log-api" "$tmp/release" "$tmp/install" "$tmp/install-api" "$tmp/tmp"
+mkdir -p "$tmp/bin" "$tmp/bin-local" "$tmp/log" "$tmp/log-api" "$tmp/log-local" "$tmp/release" "$tmp/install" "$tmp/install-api" "$tmp/install-local" "$tmp/tmp"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 printf 'fake apk\n' > "$tmp/release/pawxy-0.1.0-debug.apk"
@@ -126,5 +126,42 @@ grep -F -- "install -r" "$tmp/log-api/pm.args" >/dev/null \
 grep -Fx -- "start" "$tmp/log-api/pawxyctl.args" >/dev/null \
   || fail "private-token installer must start pawxy through installed pawxyctl"
 [ -x "$tmp/install-api/pawxyctl" ] || fail "private-token installer must install executable pawxyctl"
+
+cat > "$tmp/bin-local/curl" <<'CURL'
+#!/bin/sh
+printf '%s\n' "curl" > "$PAWXY_TEST_LOG/network-attempted"
+exit 37
+CURL
+chmod 755 "$tmp/bin-local/curl"
+
+cat > "$tmp/bin-local/wget" <<'WGET'
+#!/bin/sh
+printf '%s\n' "wget" > "$PAWXY_TEST_LOG/network-attempted"
+exit 37
+WGET
+chmod 755 "$tmp/bin-local/wget"
+
+cat > "$tmp/bin-local/pm" <<'PM'
+#!/bin/sh
+printf '%s\n' "$*" > "$PAWXY_TEST_LOG/pm.args"
+PM
+chmod 755 "$tmp/bin-local/pm"
+
+if ! PATH="$tmp/bin-local:$PATH" \
+  PAWXY_ASSET_DIR="$tmp/release" \
+  PAWXY_INSTALL_DIR="$tmp/install-local" \
+  PAWXY_TEST_LOG="$tmp/log-local" \
+  TMPDIR="$tmp/tmp" \
+    sh "$SCRIPT" >/dev/null; then
+  fail "local asset installer must not require curl or wget"
+fi
+
+[ ! -f "$tmp/log-local/network-attempted" ] \
+  || fail "local asset installer must not call curl or wget"
+grep -F -- "install -r" "$tmp/log-local/pm.args" >/dev/null \
+  || fail "local asset installer must call pm install -r"
+grep -Fx -- "start" "$tmp/log-local/pawxyctl.args" >/dev/null \
+  || fail "local asset installer must start pawxy through installed pawxyctl"
+[ -x "$tmp/install-local/pawxyctl" ] || fail "local asset installer must install executable pawxyctl"
 
 printf '%s\n' "install-android test ok"

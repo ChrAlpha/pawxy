@@ -40,6 +40,21 @@ and release asset downloads:
 curl -fsSL -H "Authorization: Bearer $GITHUB_PERSONAL_ACCESS_TOKEN" https://raw.githubusercontent.com/ChrAlpha/pawxy/main/scripts/install-android.sh | PAWXY_GITHUB_TOKEN="$GITHUB_PERSONAL_ACCESS_TOKEN" sh
 ```
 
+Shizuku/rish behaves like adb shell, not a full Unix or Termux userland. If the
+remote Shizuku shell has `curl` or `wget`, install through rish directly:
+
+```sh
+curl -fsSL https://github.com/ChrAlpha/pawxy/releases/latest/download/install-android.sh | rish
+```
+
+If that shell lacks download tools, place `install-android.sh`, `SHA256SUMS`,
+`pawxyctl`, and the debug APK in one shared-storage directory, then install from
+local assets:
+
+```sh
+rish -c 'cd /sdcard/Download/pawxy && PAWXY_ASSET_DIR=$PWD sh install-android.sh'
+```
+
 GitHub packaging is also available from Actions:
 
 - Run **Package Android** manually to download APK, `pawxyctl`,
@@ -60,6 +75,15 @@ pawxyctl status --json
 pawxyctl share on
 pawxyctl wake on
 pawxyctl stop
+```
+
+From Shizuku/rish, keep the control token in the same stable location used by
+adb shell:
+
+```sh
+rish -c 'PAWXY_HOME=/data/local/tmp/pawxy /data/local/tmp/pawxyctl start'
+rish -c 'PAWXY_HOME=/data/local/tmp/pawxy /data/local/tmp/pawxyctl status --json'
+rish -c 'PAWXY_HOME=/data/local/tmp/pawxy /data/local/tmp/pawxyctl share on'
 ```
 
 Defaults are local-only and unauthenticated:

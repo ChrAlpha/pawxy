@@ -26,7 +26,7 @@ has_cmd() {
 pick_home() {
   if [ -n "${PAWXY_HOME:-}" ]; then
     printf '%s\n' "$PAWXY_HOME"
-  elif [ -n "${HOME:-}" ] && [ -d "$HOME" ] && [ -w "$HOME" ]; then
+  elif [ -n "${HOME:-}" ] && [ "$HOME" != "/" ] && [ -d "$HOME" ] && [ -w "$HOME" ]; then
     printf '%s\n' "$HOME/.config/pawxy"
   else
     printf '%s\n' "/data/local/tmp/pawxy"
@@ -83,6 +83,18 @@ load_lan_password() {
 
 need_android_cmds() {
   has_cmd am || die "am command not found"
+}
+
+shell_uid() {
+  id -u 2>/dev/null || printf '%s\n' "unknown"
+}
+
+shell_mode() {
+  case "$1" in
+    0) printf '%s\n' "root" ;;
+    2000) printf '%s\n' "adb-shell" ;;
+    *) printf '%s\n' "android-shell" ;;
+  esac
 }
 
 start_service() {
@@ -194,6 +206,9 @@ print_status() {
 }
 
 doctor() {
+  uid=$(shell_uid)
+  printf 'shell uid: %s\n' "$uid"
+  printf 'shell mode: %s\n' "$(shell_mode "$uid")"
   printf 'package installed: '
   if has_cmd pm && pm path "$PKG" >/dev/null 2>&1; then printf 'yes\n'; else printf 'no\n'; fi
   printf 'am: '
@@ -218,6 +233,7 @@ doctor() {
   printf 'notes:\n'
   printf '  - Pawxy has no UI. Start it with pawxyctl.\n'
   printf '  - LAN mode always requires auth.\n'
+  printf '  - Shizuku/rish behaves like adb shell; use PAWXY_HOME=/data/local/tmp/pawxy for stable tokens.\n'
 }
 
 usage() {

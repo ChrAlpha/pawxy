@@ -219,6 +219,12 @@ CLI config files, or documented shell commands.
 This keeps `pawxyctl` viable from `adb shell`, Termux, and other Android shell
 environments.
 
+Shizuku/rish behaves like adb shell, not a full Unix or Termux userland.
+Shizuku support MUST assume the shell runs as Android `shell` uid 2000 unless
+the user explicitly starts Shizuku with root. Do not require Unix userland tools
+for Shizuku control commands. Prefer `PAWXY_HOME=/data/local/tmp/pawxy` in
+documented rish commands so tokens stay stable across adb shell and Shizuku.
+
 ### 3.4 One-Command Build
 
 The Android project MUST include a Gradle wrapper.
@@ -264,6 +270,8 @@ The script MUST:
 - Copy `pawxyctl` to `/data/local/tmp/pawxyctl` by default.
 - Start Pawxy through `pawxyctl start`.
 - Support a token environment variable for private release downloads.
+- Support `PAWXY_ASSET_DIR` to install from already downloaded local release
+  assets when Shizuku/rish shells do not have `curl` or `wget`.
 
 ### 3.4.2 GitHub Actions Packaging
 

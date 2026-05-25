@@ -68,6 +68,11 @@ Termux MUST NOT be a runtime dependency. `scripts/pawxyctl` MAY be run from
 Termux, but it MUST also work from `adb shell` and other Android shell
 environments when the standard Android shell commands are present.
 
+Shizuku/rish MUST be treated as an adb-shell-like Android shell, not as a
+general Unix or Termux shell. Control examples SHOULD set
+`PAWXY_HOME=/data/local/tmp/pawxy` so the token path is stable across adb shell
+and Shizuku/rish sessions.
+
 ---
 
 ## 2. Repository Contract
@@ -206,6 +211,9 @@ block or fail.
 
 The CLI MUST NOT run the proxy itself. The CLI only controls the Android
 foreground service.
+
+`pawxyctl doctor` MUST surface the current Android shell uid so Shizuku/rish
+users can see whether commands are running as adb shell uid 2000 or root.
 
 ---
 
@@ -790,6 +798,8 @@ logcat -s Pawxy PawxyNative
 
 `pawxyctl doctor` MUST be non-interactive and print:
 
+- current Android shell uid.
+- inferred shell mode.
 - package installed via `pm path dev.pawxy`.
 - `am` availability.
 - `content` availability.
@@ -799,6 +809,7 @@ logcat -s Pawxy PawxyNative
 - wake-lock status.
 - network status.
 - notes that Pawxy has no UI and LAN mode always requires auth.
+- a note that Shizuku/rish behaves like adb shell.
 
 ### 7.5 POSIX Shell Constraints
 
@@ -889,6 +900,8 @@ android/app/build/outputs/apk/debug/app-debug.apk
 7. Install the APK with `pm install -r`.
 8. Copy `pawxyctl` to `/data/local/tmp/pawxyctl` by default.
 9. Start Pawxy with the installed `pawxyctl start`.
+10. Accept `PAWXY_ASSET_DIR` to install from already downloaded local release
+    assets without requiring `curl` or `wget`, for Shizuku/rish shells.
 
 This script is an install-and-start path. It MUST NOT claim that Android APK
 installation can be skipped.

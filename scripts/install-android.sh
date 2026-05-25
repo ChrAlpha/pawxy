@@ -6,6 +6,7 @@ VERSION=${PAWXY_VERSION:-latest}
 INSTALL_DIR=${PAWXY_INSTALL_DIR:-/data/local/tmp}
 TMPDIR_BASE=${TMPDIR:-/data/local/tmp}
 AUTH_TOKEN=${PAWXY_GITHUB_TOKEN:-${GITHUB_PERSONAL_ACCESS_TOKEN:-${GITHUB_TOKEN:-}}}
+ASSET_DIR=${PAWXY_ASSET_DIR:-}
 
 CTL=pawxyctl
 SUMS=SHA256SUMS
@@ -55,7 +56,7 @@ download() {
       wget -q -O "$out" "$url"
     fi
   else
-    die "curl or wget is required"
+    die "curl or wget is required unless PAWXY_ASSET_DIR points to local release assets"
   fi
 }
 
@@ -93,7 +94,55 @@ asset_api_url() {
   ' "$RELEASE_JSON"
 }
 
+script_dir() {
+  case "$0" in
+    */*)
+      dir=${0%/*}
+      [ -n "$dir" ] || dir=/
+      CDPATH= cd "$dir" && pwd
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+find_local_asset_dir() {
+  if [ -n "$ASSET_DIR" ]; then
+    [ -d "$ASSET_DIR" ] || die "PAWXY_ASSET_DIR not found: $ASSET_DIR"
+    printf '%s\n' "$ASSET_DIR"
+    return
+  fi
+  if [ -f "$SUMS" ] && [ -f "$CTL" ]; then
+    pwd
+    return
+  fi
+  dir=$(script_dir 2>/dev/null || true)
+  if [ -n "$dir" ] && [ -f "$dir/$SUMS" ] && [ -f "$dir/$CTL" ]; then
+    printf '%s\n' "$dir"
+    return
+  fi
+}
+
+copy_local_asset() {
+  asset=$1
+  out=$2
+  [ -f "$LOCAL_ASSET_DIR/$asset" ] || die "local release asset not found: $LOCAL_ASSET_DIR/$asset"
+  cp "$LOCAL_ASSET_DIR/$asset" "$out" || die "cannot copy local release asset: $asset"
+}
+
+fetch_asset() {
+  asset=$1
+  out=$2
+  if [ -n "$LOCAL_ASSET_DIR" ]; then
+    copy_local_asset "$asset" "$out"
+  else
+    download "$asset" "$out"
+  fi
+}
+
 need_cmd pm
+need_cmd cp
 need_cmd chmod
 need_cmd sha256sum
 
@@ -102,17 +151,19 @@ rm -rf "$work"
 mkdir -p "$work" "$INSTALL_DIR" || die "cannot create install directory"
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
-if [ -n "$AUTH_TOKEN" ] && [ -z "${PAWXY_DOWNLOAD_BASE:-}" ]; then
+LOCAL_ASSET_DIR=$(find_local_asset_dir)
+
+if [ -z "$LOCAL_ASSET_DIR" ] && [ -n "$AUTH_TOKEN" ] && [ -z "${PAWXY_DOWNLOAD_BASE:-}" ]; then
   API_MODE=1
   RELEASE_JSON=$work/release.json
   download_release_json "$RELEASE_JSON"
 fi
 
-download "$SUMS" "$work/$SUMS"
+fetch_asset "$SUMS" "$work/$SUMS"
 APK=$(sed -n 's/^.*  \(pawxy-.*-debug\.apk\)$/\1/p' "$work/$SUMS" | sed -n '1p')
 [ -n "$APK" ] || die "could not find Pawxy APK name in $SUMS"
-download "$APK" "$work/$APK"
-download "$CTL" "$work/$CTL"
+fetch_asset "$APK" "$work/$APK"
+fetch_asset "$CTL" "$work/$CTL"
 
 (
   cd "$work"
@@ -122,6 +173,8 @@ download "$CTL" "$work/$CTL"
 pm install -r "$work/$APK"
 cp "$work/$CTL" "$INSTALL_DIR/$CTL"
 chmod 755 "$INSTALL_DIR/$CTL"
+PAWXY_HOME=${PAWXY_HOME:-$INSTALL_DIR/pawxy}
+export PAWXY_HOME
 "$INSTALL_DIR/$CTL" start
 
 INSTALLED_VERSION=${APK#pawxy-}

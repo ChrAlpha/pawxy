@@ -26,6 +26,7 @@ PROVIDER=$ROOT/android/app/src/main/java/dev/pawxy/StatusProvider.kt
 CTL=$ROOT/scripts/pawxyctl
 INSTALLER=$ROOT/scripts/install-android.sh
 BEST_PRACTICES=$ROOT/docs/best-practices.md
+README=$ROOT/README.md
 
 contains "$MANIFEST" "android.permission.ACCESS_NETWORK_STATE" \
   || fail "Android service must declare ACCESS_NETWORK_STATE for default-network observation"
@@ -63,6 +64,14 @@ contains "$INSTALLER" '"$INSTALL_DIR/$CTL" start' \
   || fail "Android installer must start through installed pawxyctl"
 contains "$INSTALLER" "PAWXY_GITHUB_TOKEN" \
   || fail "Android installer must support private release token downloads"
+contains "$INSTALLER" "PAWXY_ASSET_DIR" \
+  || fail "Android installer must support local release assets for Shizuku/rish shells"
+contains "$CTL" "shell uid:" \
+  || fail "pawxyctl doctor must show the Android shell uid"
+contains "$CTL" "Shizuku/rish behaves like adb shell" \
+  || fail "pawxyctl doctor must document Shizuku/rish shell semantics"
+contains "$README" "rish -c" \
+  || fail "README must document Shizuku/rish control examples"
 
 WORKFLOW=$ROOT/.github/workflows/package-android.yml
 [ -f "$WORKFLOW" ] || fail "GitHub Actions Android packaging workflow must exist"
@@ -103,5 +112,9 @@ contains "$BEST_PRACTICES" "install-and-start, not no-install startup" \
   || fail "best-practice doc must document install-and-start wording"
 contains "$BEST_PRACTICES" "PAWXY_GITHUB_TOKEN" \
   || fail "best-practice doc must document private release token usage"
+contains "$BEST_PRACTICES" "Shizuku/rish behaves like adb shell" \
+  || fail "best-practice doc must document Shizuku/rish shell semantics"
+contains "$BEST_PRACTICES" "PAWXY_ASSET_DIR" \
+  || fail "best-practice doc must document local asset installs"
 
 printf '%s\n' "best-practice contract ok"
