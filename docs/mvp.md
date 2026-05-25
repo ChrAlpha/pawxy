@@ -893,6 +893,13 @@ android/app/build/outputs/apk/debug/app-debug.apk
 This script is an install-and-start path. It MUST NOT claim that Android APK
 installation can be skipped.
 
+For private repositories, README usage MUST pass a GitHub token to both the
+script fetch and asset downloads:
+
+```sh
+curl -fsSL -H "Authorization: Bearer $GITHUB_PERSONAL_ACCESS_TOKEN" https://raw.githubusercontent.com/ChrAlpha/pawxy/main/scripts/install-android.sh | PAWXY_GITHUB_TOKEN="$GITHUB_PERSONAL_ACCESS_TOKEN" sh
+```
+
 ### 8.4 GitHub Actions Packaging
 
 `.github/workflows/package-android.yml` MUST package Android artifacts when:

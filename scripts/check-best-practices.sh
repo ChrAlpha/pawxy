@@ -101,5 +101,7 @@ contains "$BEST_PRACTICES" "Wake lock is opt-in only" \
   || fail "best-practice doc must document opt-in wake lock semantics"
 contains "$BEST_PRACTICES" "install-and-start, not no-install startup" \
   || fail "best-practice doc must document install-and-start wording"
+contains "$BEST_PRACTICES" "PAWXY_GITHUB_TOKEN" \
+  || fail "best-practice doc must document private release token usage"
 
 printf '%s\n' "best-practice contract ok"

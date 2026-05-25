@@ -244,6 +244,13 @@ Android install-and-start path:
 curl -fsSL https://github.com/ChrAlpha/pawxy/releases/latest/download/install-android.sh | sh
 ```
 
+For private repositories, the documented path MUST pass a GitHub token to both
+the script download and the release asset downloads:
+
+```sh
+curl -fsSL -H "Authorization: Bearer $GITHUB_PERSONAL_ACCESS_TOKEN" https://raw.githubusercontent.com/ChrAlpha/pawxy/main/scripts/install-android.sh | PAWXY_GITHUB_TOKEN="$GITHUB_PERSONAL_ACCESS_TOKEN" sh
+```
+
 This command MUST be described as install-and-start, not no-install startup.
 Android Foreground Service registration, manifest permissions, notification
 behavior, and package identity require APK installation.

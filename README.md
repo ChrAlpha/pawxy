@@ -33,6 +33,13 @@ Install and start on Android in one command:
 curl -fsSL https://github.com/ChrAlpha/pawxy/releases/latest/download/install-android.sh | sh
 ```
 
+For this private repository, pass a GitHub token for both the script download
+and release asset downloads:
+
+```sh
+curl -fsSL -H "Authorization: Bearer $GITHUB_PERSONAL_ACCESS_TOKEN" https://raw.githubusercontent.com/ChrAlpha/pawxy/main/scripts/install-android.sh | PAWXY_GITHUB_TOKEN="$GITHUB_PERSONAL_ACCESS_TOKEN" sh
+```
+
 GitHub packaging is also available from Actions:
 
 - Run **Package Android** manually to download APK, `pawxyctl`,
