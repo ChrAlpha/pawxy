@@ -55,11 +55,21 @@ impl PawxyServer {
 
     pub async fn run_with_metrics(
         config: PawxyConfig,
-        mut shutdown: ShutdownSignal,
+        shutdown: ShutdownSignal,
         metrics: Arc<Metrics>,
     ) -> Result<()> {
         config.validate()?;
         let listener = TcpListener::bind(config.listen).await?;
+        Self::run_bound_with_metrics(config, listener, shutdown, metrics).await
+    }
+
+    pub async fn run_bound_with_metrics(
+        config: PawxyConfig,
+        listener: TcpListener,
+        mut shutdown: ShutdownSignal,
+        metrics: Arc<Metrics>,
+    ) -> Result<()> {
+        config.validate()?;
         let local_addr = listener.local_addr()?;
         metrics.mark_started(local_addr.to_string(), &config);
 
@@ -88,11 +98,15 @@ impl PawxyServer {
 
                     let source_ip = peer_addr.ip();
                     if metrics.active_connections() >= config.max_connections as u64 {
-                        debug!("rejecting connection over global limit");
+                        let error = "max_connections limit reached";
+                        debug!(error, "rejecting connection over global limit");
+                        metrics.set_last_error(Some(error.to_string()));
                         continue;
                     }
                     if !try_acquire_source(&per_source, source_ip, config.max_per_source_ip) {
-                        debug!("rejecting connection over per-source limit");
+                        let error = "max_per_source_ip limit reached";
+                        debug!(error, "rejecting connection over per-source limit");
+                        metrics.set_last_error(Some(error.to_string()));
                         continue;
                     }
 
