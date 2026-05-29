@@ -4,10 +4,13 @@ set -u
 PKG=dev.pawxy
 SERVICE=dev.pawxy/.ProxyService
 STATUS_URI_BASE=content://dev.pawxy.status/status
+STARTUP_RETRIES=${PAWXY_STARTUP_RETRIES:-20}
+STARTUP_SLEEP_SECONDS=${PAWXY_STARTUP_SLEEP_SECONDS:-1}
 
 ACTION_START=dev.pawxy.action.START
 ACTION_STOP=dev.pawxy.action.STOP
 ACTION_RESTART=dev.pawxy.action.RESTART
+ACTION_RESET_TOKEN=dev.pawxy.action.RESET_TOKEN
 ACTION_WAKE_ON=dev.pawxy.action.WAKE_ON
 ACTION_WAKE_OFF=dev.pawxy.action.WAKE_OFF
 
@@ -21,6 +24,14 @@ die() {
 
 has_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+require_non_negative_int() {
+  name=$1
+  value=$2
+  case "$value" in
+    ''|*[!0-9]*) die "$name must be a non-negative integer" ;;
+  esac
 }
 
 pick_home() {
@@ -51,15 +62,30 @@ random_hex() {
   fi
 }
 
+is_hex_len() {
+  value=$1
+  expected_len=$2
+  [ "${#value}" -eq "$expected_len" ] || return 1
+  case "$value" in
+    *[!0123456789abcdefABCDEF]*) return 1 ;;
+  esac
+  return 0
+}
+
 ensure_token() {
   if [ -s "$TOKEN_FILE" ]; then
-    sed -n '1p' "$TOKEN_FILE"
-    return
+    token=$(sed -n '1p' "$TOKEN_FILE")
+    if is_hex_len "$token" 64; then
+      chmod 600 "$TOKEN_FILE" 2>/dev/null || true
+      printf '%s\n' "$token"
+      return
+    fi
   fi
   token=$(random_hex)
-  [ -n "$token" ] || die "could not generate control token"
+  is_hex_len "$token" 64 || die "could not generate control token"
   umask 077
   printf '%s\n' "$token" > "$TOKEN_FILE" || die "cannot write token file"
+  chmod 600 "$TOKEN_FILE" 2>/dev/null || true
   printf '%s\n' "$token"
 }
 
@@ -68,16 +94,16 @@ load_lan_password() {
   if [ -f "$CONFIG_FILE" ]; then
     LAN_PASSWORD=$(sed -n 's/^LAN_PASSWORD=//p' "$CONFIG_FILE" | sed -n '1p')
   fi
-  case "$LAN_PASSWORD" in
-    ''|*[!0123456789abcdefABCDEF]*) LAN_PASSWORD= ;;
-  esac
-  if [ -n "$LAN_PASSWORD" ]; then
+  if is_hex_len "$LAN_PASSWORD" 32; then
+    chmod 600 "$CONFIG_FILE" 2>/dev/null || true
     printf '%s\n' "$LAN_PASSWORD"
     return
   fi
   LAN_PASSWORD=$(random_hex | cut -c 1-32)
+  is_hex_len "$LAN_PASSWORD" 32 || die "could not generate LAN auth password"
   umask 077
   printf 'LAN_PASSWORD=%s\n' "$LAN_PASSWORD" > "$CONFIG_FILE" || die "cannot write config file"
+  chmod 600 "$CONFIG_FILE" 2>/dev/null || true
   printf '%s\n' "$LAN_PASSWORD"
 }
 
@@ -106,6 +132,7 @@ start_service() {
   password=${6:-}
   token=$(ensure_token)
   need_android_cmds
+  sync_control_token "$token" || return 1
 
   if [ "$auth_enabled" = "true" ]; then
     [ -n "$password" ] || die "LAN auth password is empty"
@@ -122,7 +149,7 @@ start_service() {
       --el connect_timeout_ms 10000 \
       --el idle_timeout_ms 1800000 \
       --es username "$username" \
-      --es password "$password"
+      --es password "$password" || return 1
   else
     am start-foreground-service \
       -n "$SERVICE" \
@@ -135,15 +162,75 @@ start_service() {
       --ei max_per_source_ip 64 \
       --el handshake_timeout_ms 5000 \
       --el connect_timeout_ms 10000 \
-      --el idle_timeout_ms 1800000
+      --el idle_timeout_ms 1800000 || return 1
   fi
+  case "$action" in
+    "$ACTION_RESTART") action_label=restart ;;
+    *) action_label=start ;;
+  esac
+  wait_for_start_status "$auth_enabled" "$action_label" || return 1
 }
 
 send_simple_action() {
   action=$1
   token=$(ensure_token)
   need_android_cmds
-  am start-foreground-service -n "$SERVICE" -a "$action" --es token "$token"
+  sync_control_token "$token" || return 1
+  am startservice -n "$SERVICE" -a "$action" --es token "$token" || return 1
+  case "$action" in
+    "$ACTION_STOP")
+      wait_for_stop_status stop || return 1
+      ;;
+    "$ACTION_WAKE_ON")
+      wait_for_wake_status true "wake on" || return 1
+      ;;
+    "$ACTION_WAKE_OFF")
+      wait_for_wake_status false "wake off" || return 1
+      ;;
+  esac
+}
+
+send_reset_token_action() {
+  token=$1
+  am startservice -n "$SERVICE" -a "$ACTION_RESET_TOKEN" --es token "$token"
+}
+
+sync_control_token() {
+  token=$1
+  send_reset_token_action "$token" >/dev/null || return 1
+  wait_for_token_authorized "$token" token-sync
+}
+
+wait_for_token_authorized() {
+  token=$1
+  label=$2
+  require_non_negative_int PAWXY_STARTUP_RETRIES "$STARTUP_RETRIES"
+  require_non_negative_int PAWXY_STARTUP_SLEEP_SECONDS "$STARTUP_SLEEP_SECONDS"
+  attempt=0
+  status_json_text=
+  status_error=
+  while [ "$attempt" -le "$STARTUP_RETRIES" ]; do
+    status_json_text=$(query_status_json "$token" 2>/dev/null || true)
+    if printf '%s' "$status_json_text" | json_has_key running; then
+      return 0
+    fi
+    current_error=$(printf '%s' "$status_json_text" | json_get error)
+    if [ -z "$current_error" ] || [ "$current_error" = "null" ]; then
+      current_error=$(printf '%s' "$status_json_text" | json_get last_error)
+    fi
+    if [ -n "$current_error" ] && [ "$current_error" != "null" ]; then
+      status_error=$current_error
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$STARTUP_RETRIES" ] || break
+    sleep "$STARTUP_SLEEP_SECONDS"
+  done
+  if [ -n "$status_error" ]; then
+    printf '%s\n' "pawxyctl: control token was not accepted after $label; status error=$status_error: ${status_json_text:-empty status}" >&2
+  else
+    printf '%s\n' "pawxyctl: control token was not accepted after $label: ${status_json_text:-empty status}" >&2
+  fi
+  return 1
 }
 
 status_json() {
@@ -152,7 +239,22 @@ status_json() {
     printf '%s\n' '{"ok":false,"error":"content command not found"}'
     return
   fi
-  output=$(content query --uri "$STATUS_URI_BASE/$token" 2>/dev/null || true)
+  json=$(query_status_json "$token")
+  if [ "$(printf '%s' "$json" | json_get error)" = "unauthorized" ] && has_cmd am; then
+    send_reset_token_action "$token" >/dev/null 2>&1 || true
+    json=$(query_status_json "$token")
+  fi
+  printf '%s\n' "$json"
+}
+
+query_status_json() {
+  token=$1
+  output=$(content query --uri "$STATUS_URI_BASE/$token" 2>&1)
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    printf '%s\n' '{"ok":false,"error":"content query failed"}'
+    return
+  fi
   json=$(printf '%s\n' "$output" | sed -n 's/^.*json=//p' | tail -n 1)
   if [ -n "$json" ]; then
     printf '%s\n' "$json"
@@ -163,20 +265,215 @@ status_json() {
 
 json_get() {
   key=$1
-  sed -n 's/.*"'"$key"'":\("[^"]*"\|[^,}]*\).*/\1/p' | sed 's/^"//;s/"$//'
+  sed -n 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*\("[^"]*"\|[^,}]*\).*/\1/p' \
+    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//'
 }
 
-print_status() {
-  json=$(status_json)
-  if [ "${1:-}" = "--json" ]; then
-    printf '%s\n' "$json"
-    return
-  fi
+json_has_key() {
+  key=$1
+  grep -E '"'"$key"'"[[:space:]]*:' >/dev/null 2>&1
+}
 
+wait_for_status_bool() {
+  field=$1
+  expected=$2
+  label=$3
+  require_non_negative_int PAWXY_STARTUP_RETRIES "$STARTUP_RETRIES"
+  require_non_negative_int PAWXY_STARTUP_SLEEP_SECONDS "$STARTUP_SLEEP_SECONDS"
+  attempt=0
+  status_json_text=
+  status_error=
+  while [ "$attempt" -le "$STARTUP_RETRIES" ]; do
+    status_json_text=$(status_json 2>/dev/null || true)
+    value=$(printf '%s' "$status_json_text" | json_get "$field")
+    if [ "$value" = "$expected" ]; then
+      return 0
+    fi
+    current_error=$(printf '%s' "$status_json_text" | json_get error)
+    if [ -z "$current_error" ] || [ "$current_error" = "null" ]; then
+      current_error=$(printf '%s' "$status_json_text" | json_get last_error)
+    fi
+    if [ -n "$current_error" ] && [ "$current_error" != "null" ]; then
+      status_error=$current_error
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$STARTUP_RETRIES" ] || break
+    sleep "$STARTUP_SLEEP_SECONDS"
+  done
+  if [ -n "$status_error" ]; then
+    printf '%s\n' "pawxyctl: Pawxy did not report $field=$expected after $label; status error=$status_error: ${status_json_text:-empty status}" >&2
+  else
+    printf '%s\n' "pawxyctl: Pawxy did not report $field=$expected after $label: ${status_json_text:-empty status}" >&2
+  fi
+  return 1
+}
+
+wait_for_start_status() {
+  expected_auth=$1
+  label=$2
+  require_non_negative_int PAWXY_STARTUP_RETRIES "$STARTUP_RETRIES"
+  require_non_negative_int PAWXY_STARTUP_SLEEP_SECONDS "$STARTUP_SLEEP_SECONDS"
+  attempt=0
+  status_json_text=
+  status_error=
+  while [ "$attempt" -le "$STARTUP_RETRIES" ]; do
+    status_json_text=$(status_json 2>/dev/null || true)
+    running=$(printf '%s' "$status_json_text" | json_get running)
+    native_running=$(printf '%s' "$status_json_text" | json_get native_running)
+    auth_enabled=$(printf '%s' "$status_json_text" | json_get auth_enabled)
+    native_auth_enabled=$(printf '%s' "$status_json_text" | json_get native_auth_enabled)
+    configured_auth_enabled=$(printf '%s' "$status_json_text" | json_get configured_auth_enabled)
+    if [ "$running" = "true" ] \
+      && [ "$native_running" = "true" ] \
+      && [ "$auth_enabled" = "$expected_auth" ] \
+      && [ "$native_auth_enabled" = "$expected_auth" ] \
+      && [ "$configured_auth_enabled" = "$expected_auth" ]; then
+      return 0
+    fi
+    current_error=$(printf '%s' "$status_json_text" | json_get error)
+    if [ -z "$current_error" ] || [ "$current_error" = "null" ]; then
+      current_error=$(printf '%s' "$status_json_text" | json_get last_error)
+    fi
+    if [ -n "$current_error" ] && [ "$current_error" != "null" ]; then
+      status_error=$current_error
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$STARTUP_RETRIES" ] || break
+    sleep "$STARTUP_SLEEP_SECONDS"
+  done
+  expected="running=true/native_running=true/auth_enabled=$expected_auth/native_auth_enabled=$expected_auth/configured_auth_enabled=$expected_auth"
+  if [ -n "$status_error" ]; then
+    printf '%s\n' "pawxyctl: Pawxy did not report $expected after $label; status error=$status_error: ${status_json_text:-empty status}" >&2
+  else
+    printf '%s\n' "pawxyctl: Pawxy did not report $expected after $label: ${status_json_text:-empty status}" >&2
+  fi
+  return 1
+}
+
+wait_for_stop_status() {
+  label=$1
+  require_non_negative_int PAWXY_STARTUP_RETRIES "$STARTUP_RETRIES"
+  require_non_negative_int PAWXY_STARTUP_SLEEP_SECONDS "$STARTUP_SLEEP_SECONDS"
+  attempt=0
+  status_json_text=
+  status_error=
+  while [ "$attempt" -le "$STARTUP_RETRIES" ]; do
+    status_json_text=$(status_json 2>/dev/null || true)
+    running=$(printf '%s' "$status_json_text" | json_get running)
+    native_running=$(printf '%s' "$status_json_text" | json_get native_running)
+    if [ "$running" = "false" ] && [ "$native_running" = "false" ]; then
+      return 0
+    fi
+    current_error=$(printf '%s' "$status_json_text" | json_get error)
+    if [ -z "$current_error" ] || [ "$current_error" = "null" ]; then
+      current_error=$(printf '%s' "$status_json_text" | json_get last_error)
+    fi
+    if [ -n "$current_error" ] && [ "$current_error" != "null" ]; then
+      status_error=$current_error
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$STARTUP_RETRIES" ] || break
+    sleep "$STARTUP_SLEEP_SECONDS"
+  done
+  if [ -n "$status_error" ]; then
+    printf '%s\n' "pawxyctl: Pawxy did not report running=false/native_running=false after $label; status error=$status_error: ${status_json_text:-empty status}" >&2
+  else
+    printf '%s\n' "pawxyctl: Pawxy did not report running=false/native_running=false after $label: ${status_json_text:-empty status}" >&2
+  fi
+  return 1
+}
+
+wait_for_wake_status() {
+  expected_wake=$1
+  label=$2
+  require_non_negative_int PAWXY_STARTUP_RETRIES "$STARTUP_RETRIES"
+  require_non_negative_int PAWXY_STARTUP_SLEEP_SECONDS "$STARTUP_SLEEP_SECONDS"
+  attempt=0
+  status_json_text=
+  status_error=
+  while [ "$attempt" -le "$STARTUP_RETRIES" ]; do
+    status_json_text=$(status_json 2>/dev/null || true)
+    running=$(printf '%s' "$status_json_text" | json_get running)
+    native_running=$(printf '%s' "$status_json_text" | json_get native_running)
+    wake_lock_enabled=$(printf '%s' "$status_json_text" | json_get wake_lock_enabled)
+    if [ "$running" = "true" ] \
+      && [ "$native_running" = "true" ] \
+      && [ "$wake_lock_enabled" = "$expected_wake" ]; then
+      return 0
+    fi
+    current_error=$(printf '%s' "$status_json_text" | json_get error)
+    if [ -z "$current_error" ] || [ "$current_error" = "null" ]; then
+      current_error=$(printf '%s' "$status_json_text" | json_get last_error)
+    fi
+    if [ -n "$current_error" ] && [ "$current_error" != "null" ]; then
+      status_error=$current_error
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$STARTUP_RETRIES" ] || break
+    sleep "$STARTUP_SLEEP_SECONDS"
+  done
+  expected="running=true/native_running=true/wake_lock_enabled=$expected_wake"
+  if [ -n "$status_error" ]; then
+    printf '%s\n' "pawxyctl: Pawxy did not report $expected after $label; status error=$status_error: ${status_json_text:-empty status}" >&2
+  else
+    printf '%s\n' "pawxyctl: Pawxy did not report $expected after $label: ${status_json_text:-empty status}" >&2
+  fi
+  return 1
+}
+
+wait_for_status_key() {
+  field=$1
+  label=$2
+  require_non_negative_int PAWXY_STARTUP_RETRIES "$STARTUP_RETRIES"
+  require_non_negative_int PAWXY_STARTUP_SLEEP_SECONDS "$STARTUP_SLEEP_SECONDS"
+  attempt=0
+  status_json_text=
+  status_error=
+  while [ "$attempt" -le "$STARTUP_RETRIES" ]; do
+    status_json_text=$(status_json 2>/dev/null || true)
+    if printf '%s' "$status_json_text" | json_has_key "$field"; then
+      return 0
+    fi
+    current_error=$(printf '%s' "$status_json_text" | json_get error)
+    if [ -n "$current_error" ] && [ "$current_error" != "null" ]; then
+      status_error=$current_error
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$STARTUP_RETRIES" ] || break
+    sleep "$STARTUP_SLEEP_SECONDS"
+  done
+  if [ -n "$status_error" ]; then
+    printf '%s\n' "pawxyctl: Pawxy did not expose status field $field after $label; status error=$status_error: ${status_json_text:-empty status}" >&2
+  else
+    printf '%s\n' "pawxyctl: Pawxy did not expose status field $field after $label: ${status_json_text:-empty status}" >&2
+  fi
+  return 1
+}
+
+reset_token() {
+  token=$(ensure_token)
+  need_android_cmds
+  send_reset_token_action "$token" \
+    || die "failed to reset control token"
+  wait_for_status_key running reset-token \
+    || die "control token reset did not restore status authorization"
+  printf 'control token reset: %s\n' "$TOKEN_FILE"
+}
+
+print_status_json() {
+  json=$1
   running=$(printf '%s' "$json" | json_get running)
   listen=$(printf '%s' "$json" | json_get listen)
   lan=$(printf '%s' "$json" | json_get lan)
   auth=$(printf '%s' "$json" | json_get auth_enabled)
+  native_running=$(printf '%s' "$json" | json_get native_running)
+  native_listen=$(printf '%s' "$json" | json_get native_listen)
+  native_lan=$(printf '%s' "$json" | json_get native_lan)
+  native_auth=$(printf '%s' "$json" | json_get native_auth_enabled)
+  native_started_at=$(printf '%s' "$json" | json_get native_started_at_unix_ms)
+  configured_listen=$(printf '%s' "$json" | json_get configured_listen)
+  configured_lan=$(printf '%s' "$json" | json_get configured_lan)
+  configured_auth=$(printf '%s' "$json" | json_get configured_auth_enabled)
   active=$(printf '%s' "$json" | json_get active_connections)
   total=$(printf '%s' "$json" | json_get total_connections)
   bytes_in=$(printf '%s' "$json" | json_get bytes_in)
@@ -186,23 +483,44 @@ print_status() {
   network_transport=$(printf '%s' "$json" | json_get network_transport)
   network_generation=$(printf '%s' "$json" | json_get network_generation)
   last_error=$(printf '%s' "$json" | json_get last_error)
+  status_error=$(printf '%s' "$json" | json_get error)
 
-  if [ "$running" = "true" ]; then state=running; else state=stopped; fi
+  if [ "$running" = "true" ]; then
+    state=running
+  elif [ "$running" = "false" ]; then
+    state=stopped
+  else
+    state=unknown
+  fi
   if [ "$lan" = "true" ]; then lan_state=on; else lan_state=off; fi
   if [ "$auth" = "true" ]; then auth_state=on; else auth_state=off; fi
   if [ "$wake" = "true" ]; then wake_state=on; else wake_state=off; fi
+  if [ -n "$status_error" ] && { [ -z "$last_error" ] || [ "$last_error" = "null" ]; }; then
+    last_error=$status_error
+  fi
 
   printf 'pawxy: %s\n' "$state"
   printf 'listen: %s\n' "${listen:-unknown}"
   printf 'mixed: http + socks5\n'
   printf 'lan: %s\n' "$lan_state"
   printf 'auth: %s\n' "$auth_state"
+  printf 'native: running=%s listen=%s lan=%s auth=%s started-at=%s\n' "${native_running:-unknown}" "${native_listen:-unknown}" "${native_lan:-unknown}" "${native_auth:-unknown}" "${native_started_at:-0}"
+  printf 'configured: listen=%s lan=%s auth=%s\n' "${configured_listen:-unknown}" "${configured_lan:-unknown}" "${configured_auth:-unknown}"
   printf 'active: %s\n' "${active:-0}"
   printf 'total: %s\n' "${total:-0}"
   printf 'bytes: %s/%s\n' "${bytes_in:-0}" "${bytes_out:-0}"
   printf 'wake-lock: %s\n' "$wake_state"
   printf 'network: %s/%s gen=%s\n' "${network_available:-false}" "${network_transport:-unknown}" "${network_generation:-0}"
   printf 'last-error: %s\n' "${last_error:-null}"
+}
+
+print_status() {
+  json=$(status_json)
+  if [ "${1:-}" = "--json" ]; then
+    printf '%s\n' "$json"
+    return
+  fi
+  print_status_json "$json"
 }
 
 doctor() {
@@ -217,15 +535,18 @@ doctor() {
   if has_cmd content; then printf 'found\n'; else printf 'missing\n'; fi
   printf 'token: %s\n' "$TOKEN_FILE"
   if has_cmd pm; then
+    dump_perm=$(pm check-permission android.permission.DUMP com.android.shell 2>/dev/null || true)
+    [ -n "$dump_perm" ] && printf 'shell DUMP permission: %s\n' "$dump_perm"
     perm=$(pm check-permission android.permission.POST_NOTIFICATIONS "$PKG" 2>/dev/null || true)
     [ -n "$perm" ] && printf 'notification permission: %s\n' "$perm"
   fi
   printf 'status:\n'
-  print_status | sed 's/^/  /'
-  wake=$(status_json | json_get wake_lock_enabled)
+  json=$(status_json)
+  print_status_json "$json" | sed 's/^/  /'
+  wake=$(printf '%s' "$json" | json_get wake_lock_enabled)
   if [ "$wake" = "true" ]; then wake_state=enabled; else wake_state=disabled; fi
   printf 'wake lock according to status: %s\n' "$wake_state"
-  network=$(status_json)
+  network=$json
   network_available=$(printf '%s' "$network" | json_get network_available)
   network_transport=$(printf '%s' "$network" | json_get network_transport)
   network_generation=$(printf '%s' "$network" | json_get network_generation)
@@ -242,6 +563,7 @@ usage:
   pawxyctl start
   pawxyctl stop
   pawxyctl restart
+  pawxyctl reset-token
   pawxyctl status [--json]
   pawxyctl logs
   pawxyctl share on|off
@@ -253,13 +575,19 @@ USAGE
 cmd=${1:-}
 case "$cmd" in
   start)
-    start_service "$ACTION_START" "$DEFAULT_LISTEN" false false
+    start_service "$ACTION_START" "$DEFAULT_LISTEN" false false \
+      || die "failed to start proxy"
     ;;
   stop)
-    send_simple_action "$ACTION_STOP"
+    send_simple_action "$ACTION_STOP" \
+      || die "failed to stop proxy"
     ;;
   restart)
-    start_service "$ACTION_RESTART" "$DEFAULT_LISTEN" false false
+    start_service "$ACTION_RESTART" "$DEFAULT_LISTEN" false false \
+      || die "failed to restart proxy"
+    ;;
+  reset-token)
+    reset_token
     ;;
   status)
     print_status "${2:-}"
@@ -272,11 +600,13 @@ case "$cmd" in
     case "${2:-}" in
       on)
         password=$(load_lan_password)
-        start_service "$ACTION_START" "$LAN_LISTEN" true true pawxy "$password"
+        start_service "$ACTION_START" "$LAN_LISTEN" true true pawxy "$password" \
+          || die "failed to start LAN sharing"
         printf 'LAN sharing enabled with username pawxy and password stored in %s\n' "$CONFIG_FILE"
         ;;
       off)
-        start_service "$ACTION_START" "$DEFAULT_LISTEN" false false
+        start_service "$ACTION_START" "$DEFAULT_LISTEN" false false \
+          || die "failed to disable LAN sharing"
         ;;
       *)
         usage
@@ -286,8 +616,14 @@ case "$cmd" in
     ;;
   wake)
     case "${2:-}" in
-      on) send_simple_action "$ACTION_WAKE_ON" ;;
-      off) send_simple_action "$ACTION_WAKE_OFF" ;;
+      on)
+        send_simple_action "$ACTION_WAKE_ON" \
+          || die "failed to enable wake lock"
+        ;;
+      off)
+        send_simple_action "$ACTION_WAKE_OFF" \
+          || die "failed to disable wake lock"
+        ;;
       *) usage; exit 1 ;;
     esac
     ;;
