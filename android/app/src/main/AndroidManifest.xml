@@ -14,11 +14,13 @@
         <service
             android:name=".ProxyService"
             android:exported="true"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="dev.pawxy.action.START" />
                 <action android:name="dev.pawxy.action.STOP" />
                 <action android:name="dev.pawxy.action.RESTART" />
+                <action android:name="dev.pawxy.action.RESET_TOKEN" />
                 <action android:name="dev.pawxy.action.WAKE_ON" />
                 <action android:name="dev.pawxy.action.WAKE_OFF" />
             </intent-filter>
@@ -30,6 +32,7 @@
         <provider
             android:name=".StatusProvider"
             android:authorities="dev.pawxy.status"
-            android:exported="true" />
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
     </application>
 </manifest>

@@ -6,18 +6,27 @@ class ControlToken(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun provisionIfNeeded(token: String?): Boolean {
-        if (token.isNullOrBlank()) return false
+        if (!isValidToken(token)) return false
         val stored = prefs.getString(KEY_CONTROL_TOKEN, null)
         if (stored == null) {
-            prefs.edit().putString(KEY_CONTROL_TOKEN, token).apply()
-            return true
+            return prefs.edit().putString(KEY_CONTROL_TOKEN, token).commit()
         }
         return stored == token
     }
 
     fun validate(token: String?): Boolean {
-        if (token.isNullOrBlank()) return false
+        if (!isValidToken(token)) return false
         return prefs.getString(KEY_CONTROL_TOKEN, null) == token
+    }
+
+    fun replace(token: String?): Boolean {
+        if (!isValidToken(token)) return false
+        return prefs.edit().putString(KEY_CONTROL_TOKEN, token).commit()
+    }
+
+    private fun isValidToken(token: String?): Boolean {
+        if (token == null || token.length != 64) return false
+        return token.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
     }
 
     companion object {

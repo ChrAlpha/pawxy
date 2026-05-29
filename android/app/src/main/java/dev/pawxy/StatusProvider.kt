@@ -36,16 +36,17 @@ class StatusProvider : ContentProvider() {
                 .put("error", error.message ?: "native status failed")
         }
         val prefs = context.getSharedPreferences(ControlToken.PREFS, android.content.Context.MODE_PRIVATE)
+        copyNativeRuntimeFields(nativeJson)
         nativeJson
             .put("wake_lock_enabled", prefs.getBoolean(ProxyService.KEY_WAKE_LOCK_ENABLED, false))
             .put("service_started", prefs.getBoolean(ProxyService.KEY_SERVICE_STARTED, false))
             .put("network_available", prefs.getBoolean(ProxyService.KEY_NETWORK_AVAILABLE, false))
             .put("network_transport", prefs.getString(ProxyService.KEY_NETWORK_TRANSPORT, "unknown"))
             .put("network_generation", prefs.getLong(ProxyService.KEY_NETWORK_GENERATION, 0L))
-            .put("listen", prefs.getString(ProxyService.KEY_LISTEN, nativeJson.optString("listen")))
-            .put("lan", prefs.getBoolean(ProxyService.KEY_LAN, nativeJson.optBoolean("lan", false)))
+            .put("configured_listen", prefs.getString(ProxyService.KEY_LISTEN, nativeJson.optString("listen")))
+            .put("configured_lan", prefs.getBoolean(ProxyService.KEY_LAN, nativeJson.optBoolean("lan", false)))
             .put(
-                "auth_enabled",
+                "configured_auth_enabled",
                 prefs.getBoolean(
                     ProxyService.KEY_AUTH_ENABLED,
                     nativeJson.optBoolean("auth_enabled", false)
@@ -53,6 +54,16 @@ class StatusProvider : ContentProvider() {
             )
         cursor.addRow(arrayOf(nativeJson.toString()))
         return cursor
+    }
+
+    private fun copyNativeRuntimeFields(json: JSONObject) {
+        if (json.has("running")) json.put("native_running", json.optBoolean("running", false))
+        if (json.has("listen")) json.put("native_listen", json.optString("listen"))
+        if (json.has("lan")) json.put("native_lan", json.optBoolean("lan", false))
+        if (json.has("auth_enabled")) json.put("native_auth_enabled", json.optBoolean("auth_enabled", false))
+        if (json.has("started_at_unix_ms")) {
+            json.put("native_started_at_unix_ms", json.optLong("started_at_unix_ms", 0L))
+        }
     }
 
     override fun getType(uri: Uri): String = "application/json"
