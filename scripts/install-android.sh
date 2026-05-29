@@ -7,9 +7,13 @@ INSTALL_DIR=${PAWXY_INSTALL_DIR:-/data/local/tmp}
 TMPDIR_BASE=${TMPDIR:-/data/local/tmp}
 AUTH_TOKEN=${PAWXY_GITHUB_TOKEN:-${GITHUB_PERSONAL_ACCESS_TOKEN:-${GITHUB_TOKEN:-}}}
 ASSET_DIR=${PAWXY_ASSET_DIR:-}
+STARTUP_RETRIES=${PAWXY_STARTUP_RETRIES:-20}
+STARTUP_SLEEP_SECONDS=${PAWXY_STARTUP_SLEEP_SECONDS:-1}
+START_SENT=0
 
 CTL=pawxyctl
 SUMS=SHA256SUMS
+PKG=dev.pawxy
 if [ "$VERSION" = "latest" ]; then
   DEFAULT_BASE_URL=https://github.com/$REPO/releases/latest/download
 else
@@ -30,6 +34,89 @@ has_cmd() {
 
 need_cmd() {
   has_cmd "$1" || die "$1 command not found"
+}
+
+json_bool_field() {
+  field=$1
+  json=$2
+  printf '%s\n' "$json" | sed -n 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' | sed -n '1p'
+}
+
+json_string_field() {
+  field=$1
+  json=$2
+  printf '%s\n' "$json" | sed -n 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p'
+}
+
+require_non_negative_int() {
+  name=$1
+  value=$2
+  case "$value" in
+    ''|*[!0-9]*) die "$name must be a non-negative integer" ;;
+  esac
+}
+
+verify_android_shell_permissions() {
+  uid=$(id -u 2>/dev/null || true)
+  case "$uid" in
+    0|2000)
+      ;;
+    *)
+      die "installer must run as Android shell or root; got uid ${uid:-unknown}. Run through adb shell or Shizuku/rish."
+      ;;
+  esac
+
+  if [ "$uid" = "2000" ]; then
+    dump_permission=$(pm check-permission android.permission.DUMP com.android.shell 2>/dev/null || true)
+    case "$dump_permission" in
+      granted*)
+        ;;
+      *)
+        die "com.android.shell lacks android.permission.DUMP: ${dump_permission:-unknown}. Run through adb shell or Shizuku/rish."
+        ;;
+    esac
+  fi
+}
+
+verify_package_installed() {
+  package_path=$(pm path "$PKG" 2>/dev/null | awk '/^package:/ { print; exit }')
+  [ -n "$package_path" ] \
+    || die "Pawxy package $PKG was not visible after install; pm path returned empty"
+}
+
+stop_started_service() {
+  [ "$START_SENT" = "1" ] || return 0
+  PAWXY_HOME=${PAWXY_HOME:-$INSTALL_DIR/pawxy} "$INSTALL_DIR/$CTL" stop >/dev/null 2>&1 || true
+}
+
+wait_for_running_status() {
+  attempt=0
+  status_json=
+  status_error=
+  while [ "$attempt" -le "$STARTUP_RETRIES" ]; do
+    status_json=$("$INSTALL_DIR/$CTL" status --json 2>/dev/null || true)
+    if [ "$(json_bool_field running "$status_json")" = "true" ] \
+      && [ "$(json_bool_field native_running "$status_json")" = "true" ] \
+      && [ "$(json_bool_field auth_enabled "$status_json")" = "false" ] \
+      && [ "$(json_bool_field native_auth_enabled "$status_json")" = "false" ] \
+      && [ "$(json_bool_field configured_auth_enabled "$status_json")" = "false" ]; then
+      return 0
+    fi
+    current_error=$(json_string_field error "$status_json")
+    if [ -z "$current_error" ] || [ "$current_error" = "null" ]; then
+      current_error=$(json_string_field last_error "$status_json")
+    fi
+    [ -z "$current_error" ] || status_error=$current_error
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$STARTUP_RETRIES" ] || break
+    sleep "$STARTUP_SLEEP_SECONDS"
+  done
+  if [ -n "$status_error" ]; then
+    stop_started_service
+    die "Pawxy did not report running=true/native_running=true after start; status error=$status_error: ${status_json:-empty status}"
+  fi
+  stop_started_service
+  die "Pawxy did not report running=true/native_running=true after start: ${status_json:-empty status}"
 }
 
 download() {
@@ -145,6 +232,10 @@ need_cmd pm
 need_cmd cp
 need_cmd chmod
 need_cmd sha256sum
+need_cmd id
+require_non_negative_int PAWXY_STARTUP_RETRIES "$STARTUP_RETRIES"
+require_non_negative_int PAWXY_STARTUP_SLEEP_SECONDS "$STARTUP_SLEEP_SECONDS"
+verify_android_shell_permissions
 
 work=$TMPDIR_BASE/pawxy-install.$$
 rm -rf "$work"
@@ -171,11 +262,19 @@ fetch_asset "$CTL" "$work/$CTL"
 ) >/dev/null
 
 pm install -r "$work/$APK"
+verify_package_installed
+pm grant "$PKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
 cp "$work/$CTL" "$INSTALL_DIR/$CTL"
 chmod 755 "$INSTALL_DIR/$CTL"
 PAWXY_HOME=${PAWXY_HOME:-$INSTALL_DIR/pawxy}
 export PAWXY_HOME
-"$INSTALL_DIR/$CTL" start
+START_SENT=1
+"$INSTALL_DIR/$CTL" start \
+  || {
+    stop_started_service
+    die "failed to start Pawxy through installed pawxyctl"
+  }
+wait_for_running_status
 
 INSTALLED_VERSION=${APK#pawxy-}
 INSTALLED_VERSION=${INSTALLED_VERSION%-debug.apk}
@@ -184,7 +283,7 @@ cat <<EOF
 Pawxy $INSTALLED_VERSION installed and started.
 
 Control:
-  $INSTALL_DIR/$CTL status
-  $INSTALL_DIR/$CTL share on
-  $INSTALL_DIR/$CTL stop
+  PAWXY_HOME=$PAWXY_HOME $INSTALL_DIR/$CTL status
+  PAWXY_HOME=$PAWXY_HOME $INSTALL_DIR/$CTL share on
+  PAWXY_HOME=$PAWXY_HOME $INSTALL_DIR/$CTL stop
 EOF
