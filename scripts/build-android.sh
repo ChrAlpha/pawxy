@@ -6,6 +6,14 @@ cd "$ROOT"
 
 mkdir -p android/app/src/main/jniLibs
 
+ANDROID_RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384"
+if [ -n "${RUSTFLAGS:-}" ]; then
+  RUSTFLAGS="$RUSTFLAGS $ANDROID_RUSTFLAGS"
+else
+  RUSTFLAGS=$ANDROID_RUSTFLAGS
+fi
+export RUSTFLAGS
+
 if cargo ndk --version >/dev/null 2>&1; then
   cargo ndk \
     -t arm64-v8a \
