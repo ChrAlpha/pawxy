@@ -66,6 +66,14 @@ if [ "${PAWXY_TEST_AM_FAIL:-0}" = "1" ]; then
       ;;
   esac
 fi
+if [ "${PAWXY_TEST_FGS_BACKGROUND_FAIL:-0}" = "1" ]; then
+  case "$*" in
+    start-foreground-service*)
+      printf '%s\n' "Error: app is in background uid null" >&2
+      exit 37
+      ;;
+  esac
+fi
 state=$PAWXY_TEST_LOG/status-state.json
 case "$*" in
   *"dev.pawxy.action.START"*)
@@ -324,6 +332,22 @@ grep -F -- '"configured_auth_enabled":false' "$tmp/log/status-state.json" >/dev/
 start_status_queries=$(grep -c -- "content://dev.pawxy.status/status" "$tmp/log/content.args")
 [ "$start_status_queries" = "2" ] \
   || fail "pawxyctl start must verify token sync and startup fields with bounded status queries"
+
+: > "$tmp/log/am.args"
+: > "$tmp/log/content.args"
+rm -f "$tmp/log/status-state.json"
+PATH="$tmp/bin:$PATH" \
+  PAWXY_HOME="$tmp/home" \
+  PAWXY_TEST_LOG="$tmp/log" \
+  PAWXY_TEST_FGS_BACKGROUND_FAIL=1 \
+  sh "$SCRIPT" start >/dev/null
+
+grep -F -- "start-foreground-service -n dev.pawxy/.ProxyService -a dev.pawxy.action.START" "$tmp/log/am.args" >/dev/null \
+  || fail "pawxyctl start must try direct foreground-service startup before the activity bridge"
+grep -F -- "start -n dev.pawxy/.ControlActivity -a dev.pawxy.action.START" "$tmp/log/am.args" >/dev/null \
+  || fail "pawxyctl start must fall back to the control activity when direct foreground-service startup is background-blocked"
+grep -F -- '"running":true' "$tmp/log/status-state.json" >/dev/null \
+  || fail "pawxyctl start activity fallback must wait for running=true status"
 
 if PATH="$tmp/bin:$PATH" \
   PAWXY_HOME="$tmp/home" \

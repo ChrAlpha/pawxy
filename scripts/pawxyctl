@@ -3,6 +3,7 @@ set -u
 
 PKG=dev.pawxy
 SERVICE=dev.pawxy/.ProxyService
+CONTROL_ACTIVITY=dev.pawxy/.ControlActivity
 STATUS_URI_BASE=content://dev.pawxy.status/status
 STARTUP_RETRIES=${PAWXY_STARTUP_RETRIES:-20}
 STARTUP_SLEEP_SECONDS=${PAWXY_STARTUP_SLEEP_SECONDS:-1}
@@ -123,19 +124,22 @@ shell_mode() {
   esac
 }
 
-start_service() {
+is_background_fgs_error() {
+  case "$1" in
+    *"app is in background uid null"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+am_start_foreground_service() {
   action=$1
   listen=$2
   lan=$3
   auth_enabled=$4
   username=${5:-}
   password=${6:-}
-  token=$(ensure_token)
-  need_android_cmds
-  sync_control_token "$token" || return 1
 
   if [ "$auth_enabled" = "true" ]; then
-    [ -n "$password" ] || die "LAN auth password is empty"
     am start-foreground-service \
       -n "$SERVICE" \
       -a "$action" \
@@ -164,6 +168,84 @@ start_service() {
       --el connect_timeout_ms 10000 \
       --el idle_timeout_ms 1800000 || return 1
   fi
+}
+
+am_start_control_activity() {
+  action=$1
+  listen=$2
+  lan=$3
+  auth_enabled=$4
+  username=${5:-}
+  password=${6:-}
+
+  if [ "$auth_enabled" = "true" ]; then
+    am start \
+      -n "$CONTROL_ACTIVITY" \
+      -a "$action" \
+      --es token "$token" \
+      --es listen "$listen" \
+      --ez lan "$lan" \
+      --ez auth_enabled "$auth_enabled" \
+      --ei max_connections 256 \
+      --ei max_per_source_ip 64 \
+      --el handshake_timeout_ms 5000 \
+      --el connect_timeout_ms 10000 \
+      --el idle_timeout_ms 1800000 \
+      --es username "$username" \
+      --es password "$password" || return 1
+  else
+    am start \
+      -n "$CONTROL_ACTIVITY" \
+      -a "$action" \
+      --es token "$token" \
+      --es listen "$listen" \
+      --ez lan "$lan" \
+      --ez auth_enabled "$auth_enabled" \
+      --ei max_connections 256 \
+      --ei max_per_source_ip 64 \
+      --el handshake_timeout_ms 5000 \
+      --el connect_timeout_ms 10000 \
+      --el idle_timeout_ms 1800000 || return 1
+  fi
+}
+
+send_start_action() {
+  output=$(am_start_foreground_service "$@" 2>&1)
+  rc=$?
+  if [ "$rc" = "0" ]; then
+    [ -z "$output" ] || printf '%s\n' "$output"
+    return 0
+  fi
+  if is_background_fgs_error "$output"; then
+    printf '%s\n' "pawxyctl: direct foreground-service start was background-blocked; retrying through control activity" >&2
+    activity_output=$(am_start_control_activity "$@" 2>&1)
+    activity_rc=$?
+    if [ "$activity_rc" = "0" ]; then
+      [ -z "$activity_output" ] || printf '%s\n' "$activity_output"
+      return 0
+    fi
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
+    [ -z "$activity_output" ] || printf '%s\n' "$activity_output" >&2
+    return "$activity_rc"
+  fi
+  [ -z "$output" ] || printf '%s\n' "$output" >&2
+  return "$rc"
+}
+
+start_service() {
+  action=$1
+  listen=$2
+  lan=$3
+  auth_enabled=$4
+  username=${5:-}
+  password=${6:-}
+  token=$(ensure_token)
+  need_android_cmds
+  sync_control_token "$token" || return 1
+  if [ "$auth_enabled" = "true" ]; then
+    [ -n "$password" ] || die "LAN auth password is empty"
+  fi
+  send_start_action "$action" "$listen" "$lan" "$auth_enabled" "$username" "$password" || return 1
   case "$action" in
     "$ACTION_RESTART") action_label=restart ;;
     *) action_label=start ;;
