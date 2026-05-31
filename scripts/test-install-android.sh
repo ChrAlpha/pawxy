@@ -14,7 +14,7 @@ sh -n "$SCRIPT"
 
 tmp=${TMPDIR:-/tmp}/pawxy-install-test.$$
 rm -rf "$tmp"
-mkdir -p "$tmp/bin" "$tmp/bin-local" "$tmp/log" "$tmp/log-api" "$tmp/log-local" "$tmp/log-pm-check-fallback" "$tmp/log-pm-check-unknown" "$tmp/log-delayed-start" "$tmp/log-status-failure" "$tmp/log-native-status-failure" "$tmp/log-start-failure" "$tmp/log-status-error" "$tmp/log-last-error" "$tmp/log-bad-shell-uid" "$tmp/log-dump-denied" "$tmp/log-package-missing" "$tmp/release" "$tmp/install" "$tmp/install-api" "$tmp/install-local" "$tmp/install-pm-check-fallback" "$tmp/install-pm-check-unknown" "$tmp/install-delayed-start" "$tmp/install-status-failure" "$tmp/install-native-status-failure" "$tmp/install-start-failure" "$tmp/install-status-error" "$tmp/install-last-error" "$tmp/install-bad-shell-uid" "$tmp/install-dump-denied" "$tmp/install-package-missing" "$tmp/tmp"
+mkdir -p "$tmp/bin" "$tmp/bin-local" "$tmp/log" "$tmp/log-api" "$tmp/log-local" "$tmp/log-pm-check-fallback" "$tmp/log-pm-check-unknown" "$tmp/log-delayed-start" "$tmp/log-status-failure" "$tmp/log-native-status-failure" "$tmp/log-start-failure" "$tmp/log-status-error" "$tmp/log-last-error" "$tmp/log-bad-shell-uid" "$tmp/log-dump-denied" "$tmp/log-pm-install-failure" "$tmp/log-package-missing" "$tmp/release" "$tmp/install" "$tmp/install-api" "$tmp/install-local" "$tmp/install-pm-check-fallback" "$tmp/install-pm-check-unknown" "$tmp/install-delayed-start" "$tmp/install-status-failure" "$tmp/install-native-status-failure" "$tmp/install-start-failure" "$tmp/install-status-error" "$tmp/install-last-error" "$tmp/install-bad-shell-uid" "$tmp/install-dump-denied" "$tmp/install-pm-install-failure" "$tmp/install-package-missing" "$tmp/tmp"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 printf 'fake apk\n' > "$tmp/release/pawxy-0.1.0-debug.apk"
@@ -118,6 +118,10 @@ if [ "${1:-}" = "check-permission" ]; then
 elif [ "${1:-}" = "path" ] && [ "${2:-}" = "dev.pawxy" ]; then
   if [ "${PAWXY_TEST_PM_PATH_MISSING:-0}" != "1" ]; then
     printf '%s\n' "package:/data/app/dev.pawxy/base.apk"
+  fi
+elif [ "${1:-}" = "install" ]; then
+  if [ "${PAWXY_TEST_PM_INSTALL_FAIL:-0}" = "1" ]; then
+    exit 43
   fi
 fi
 PM
@@ -407,6 +411,20 @@ if PATH="$tmp/bin:$PATH" \
 fi
 grep -F -- "com.android.shell lacks android.permission.DUMP" "$tmp/log-dump-denied/script.err" >/dev/null \
   || fail "DUMP denied installer failure must explain the missing shell DUMP permission"
+
+if PATH="$tmp/bin:$PATH" \
+  PAWXY_VERSION=0.1.0 \
+  PAWXY_INSTALL_DIR="$tmp/install-pm-install-failure" \
+  PAWXY_TEST_RELEASE="$tmp/release" \
+  PAWXY_TEST_RELEASE_JSON="$tmp/release.json" \
+  PAWXY_TEST_LOG="$tmp/log-pm-install-failure" \
+  PAWXY_TEST_PM_INSTALL_FAIL=1 \
+  TMPDIR="$tmp/tmp" \
+    sh "$SCRIPT" >"$tmp/log-pm-install-failure/script.out" 2>"$tmp/log-pm-install-failure/script.err"; then
+  fail "installer must fail when pm install fails"
+fi
+grep -F -- "pm install failed" "$tmp/log-pm-install-failure/script.err" >/dev/null \
+  || fail "pm install failure must not exit silently"
 
 if PATH="$tmp/bin:$PATH" \
   PAWXY_VERSION=0.1.0 \

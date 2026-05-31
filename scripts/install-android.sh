@@ -32,6 +32,10 @@ warn() {
   printf '%s\n' "pawxy install: warning: $*" >&2
 }
 
+info() {
+  printf '%s\n' "pawxy install: $*" >&2
+}
+
 has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -58,6 +62,27 @@ require_non_negative_int() {
   case "$value" in
     ''|*[!0-9]*) die "$name must be a non-negative integer" ;;
   esac
+}
+
+run_step() {
+  label=$1
+  shift
+  if output=$("$@" 2>&1); then
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
+  else
+    rc=$?
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
+    die "$label failed (exit $rc)"
+  fi
+}
+
+verify_checksums() {
+  if output=$(cd "$work" && sha256sum -c "$SUMS" 2>&1); then
+    return
+  fi
+  rc=$?
+  [ -z "$output" ] || printf '%s\n' "$output" >&2
+  die "SHA256 verification failed (exit $rc)"
 }
 
 base64_decode() {
@@ -313,19 +338,19 @@ APK=$(sed -n 's/^.*  \(pawxy-.*-debug\.apk\)$/\1/p' "$work/$SUMS" | sed -n '1p')
 fetch_asset "$APK" "$work/$APK"
 fetch_asset "$CTL" "$work/$CTL"
 
-(
-  cd "$work"
-  sha256sum -c "$SUMS"
-) >/dev/null
-
-pm install -r "$work/$APK"
+info "verifying release assets"
+verify_checksums
+info "installing $APK"
+run_step "pm install" pm install -r "$work/$APK"
 verify_package_installed
 pm grant "$PKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
-cp "$work/$CTL" "$INSTALL_DIR/$CTL"
-chmod 755 "$INSTALL_DIR/$CTL"
+info "installing pawxyctl to $INSTALL_DIR/$CTL"
+run_step "copy pawxyctl" cp "$work/$CTL" "$INSTALL_DIR/$CTL"
+run_step "chmod pawxyctl" chmod 755 "$INSTALL_DIR/$CTL"
 PAWXY_HOME=${PAWXY_HOME:-$INSTALL_DIR/pawxy}
 export PAWXY_HOME
 START_SENT=1
+info "starting Pawxy"
 "$INSTALL_DIR/$CTL" start \
   || {
     stop_started_service
