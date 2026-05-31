@@ -60,6 +60,22 @@ require_non_negative_int() {
   esac
 }
 
+base64_decode() {
+  if has_cmd base64; then
+    base64 -d
+  elif has_cmd toybox; then
+    toybox base64 -d
+  else
+    die "base64 or toybox is required to extract embedded release assets"
+  fi
+}
+
+# PAWXY_EMBEDDED_ASSETS_BEGIN
+embedded_asset() {
+  return 1
+}
+# PAWXY_EMBEDDED_ASSETS_END
+
 shell_dump_permission() {
   result=$(pm check-permission android.permission.DUMP com.android.shell 2>/dev/null || true)
   case "$result" in
@@ -253,6 +269,8 @@ fetch_asset() {
   out=$2
   if [ -n "$LOCAL_ASSET_DIR" ]; then
     copy_local_asset "$asset" "$out"
+  elif embedded_asset "$asset" "$out"; then
+    :
   else
     download "$asset" "$out"
   fi
@@ -273,14 +291,23 @@ mkdir -p "$work" "$INSTALL_DIR" || die "cannot create install directory"
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
 LOCAL_ASSET_DIR=$(find_local_asset_dir)
+EMBEDDED_SUMS_READY=0
+if [ -z "$LOCAL_ASSET_DIR" ] && embedded_asset "$SUMS" "$work/$SUMS"; then
+  EMBEDDED_SUMS_READY=1
+fi
 
-if [ -z "$LOCAL_ASSET_DIR" ] && [ -n "$AUTH_TOKEN" ] && [ -z "${PAWXY_DOWNLOAD_BASE:-}" ]; then
+if [ "$EMBEDDED_SUMS_READY" = "0" ] \
+  && [ -z "$LOCAL_ASSET_DIR" ] \
+  && [ -n "$AUTH_TOKEN" ] \
+  && [ -z "${PAWXY_DOWNLOAD_BASE:-}" ]; then
   API_MODE=1
   RELEASE_JSON=$work/release.json
   download_release_json "$RELEASE_JSON"
 fi
 
-fetch_asset "$SUMS" "$work/$SUMS"
+if [ "$EMBEDDED_SUMS_READY" = "0" ]; then
+  fetch_asset "$SUMS" "$work/$SUMS"
+fi
 APK=$(sed -n 's/^.*  \(pawxy-.*-debug\.apk\)$/\1/p' "$work/$SUMS" | sed -n '1p')
 [ -n "$APK" ] || die "could not find Pawxy APK name in $SUMS"
 fetch_asset "$APK" "$work/$APK"
