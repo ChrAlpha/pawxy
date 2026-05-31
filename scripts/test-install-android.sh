@@ -14,7 +14,7 @@ sh -n "$SCRIPT"
 
 tmp=${TMPDIR:-/tmp}/pawxy-install-test.$$
 rm -rf "$tmp"
-mkdir -p "$tmp/bin" "$tmp/bin-local" "$tmp/log" "$tmp/log-api" "$tmp/log-local" "$tmp/log-pm-check-fallback" "$tmp/log-pm-check-unknown" "$tmp/log-delayed-start" "$tmp/log-status-failure" "$tmp/log-native-status-failure" "$tmp/log-start-failure" "$tmp/log-status-error" "$tmp/log-last-error" "$tmp/log-bad-shell-uid" "$tmp/log-dump-denied" "$tmp/log-pm-install-failure" "$tmp/log-package-missing" "$tmp/release" "$tmp/install" "$tmp/install-api" "$tmp/install-local" "$tmp/install-pm-check-fallback" "$tmp/install-pm-check-unknown" "$tmp/install-delayed-start" "$tmp/install-status-failure" "$tmp/install-native-status-failure" "$tmp/install-start-failure" "$tmp/install-status-error" "$tmp/install-last-error" "$tmp/install-bad-shell-uid" "$tmp/install-dump-denied" "$tmp/install-pm-install-failure" "$tmp/install-package-missing" "$tmp/tmp"
+mkdir -p "$tmp/bin" "$tmp/bin-local" "$tmp/log" "$tmp/log-api" "$tmp/log-local" "$tmp/log-existing-package" "$tmp/log-pm-check-fallback" "$tmp/log-pm-check-unknown" "$tmp/log-delayed-start" "$tmp/log-status-failure" "$tmp/log-native-status-failure" "$tmp/log-start-failure" "$tmp/log-status-error" "$tmp/log-last-error" "$tmp/log-bad-shell-uid" "$tmp/log-dump-denied" "$tmp/log-pm-install-failure" "$tmp/log-package-missing" "$tmp/release" "$tmp/install" "$tmp/install-api" "$tmp/install-local" "$tmp/install-existing-package" "$tmp/install-pm-check-fallback" "$tmp/install-pm-check-unknown" "$tmp/install-delayed-start" "$tmp/install-status-failure" "$tmp/install-native-status-failure" "$tmp/install-start-failure" "$tmp/install-status-error" "$tmp/install-last-error" "$tmp/install-bad-shell-uid" "$tmp/install-dump-denied" "$tmp/install-pm-install-failure" "$tmp/install-package-missing" "$tmp/tmp"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 printf 'fake apk\n' > "$tmp/release/pawxy-0.1.0-debug.apk"
@@ -116,13 +116,15 @@ if [ "${1:-}" = "check-permission" ]; then
   fi
   printf '%s\n' "${PAWXY_TEST_DUMP_PERMISSION:-granted}"
 elif [ "${1:-}" = "path" ] && [ "${2:-}" = "dev.pawxy" ]; then
-  if [ "${PAWXY_TEST_PM_PATH_MISSING:-0}" != "1" ]; then
+  if [ "${PAWXY_TEST_PM_PATH_MISSING:-0}" != "1" ] \
+    && { [ "${PAWXY_TEST_PACKAGE_ALREADY_INSTALLED:-0}" = "1" ] || [ -f "$PAWXY_TEST_LOG/pm-installed" ]; }; then
     printf '%s\n' "package:/data/app/dev.pawxy/base.apk"
   fi
 elif [ "${1:-}" = "install" ]; then
   if [ "${PAWXY_TEST_PM_INSTALL_FAIL:-0}" = "1" ]; then
     exit 43
   fi
+  : > "$PAWXY_TEST_LOG/pm-installed"
 fi
 PM
 chmod 755 "$tmp/bin/pm"
@@ -194,6 +196,23 @@ grep -Fx -- "status --json" "$tmp/log-api/pawxyctl.args" >/dev/null \
 
 PATH="$tmp/bin:$PATH" \
 PAWXY_VERSION=0.1.0 \
+PAWXY_INSTALL_DIR="$tmp/install-existing-package" \
+PAWXY_TEST_RELEASE="$tmp/release" \
+PAWXY_TEST_RELEASE_JSON="$tmp/release.json" \
+PAWXY_TEST_LOG="$tmp/log-existing-package" \
+PAWXY_TEST_PACKAGE_ALREADY_INSTALLED=1 \
+TMPDIR="$tmp/tmp" \
+  sh "$SCRIPT" >/dev/null
+
+grep -F -- "install -r" "$tmp/log-existing-package/pm.args" >/dev/null \
+  && fail "installer must skip pm install when Pawxy package is already installed"
+grep -F -- "path dev.pawxy" "$tmp/log-existing-package/pm.args" >/dev/null \
+  || fail "installer must check existing package visibility before pm install"
+grep -Fx -- "start" "$tmp/log-existing-package/pawxyctl.args" >/dev/null \
+  || fail "installer must continue startup when package is already installed"
+
+PATH="$tmp/bin:$PATH" \
+PAWXY_VERSION=0.1.0 \
 PAWXY_INSTALL_DIR="$tmp/install-pm-check-fallback" \
 PAWXY_TEST_RELEASE="$tmp/release" \
 PAWXY_TEST_RELEASE_JSON="$tmp/release.json" \
@@ -249,9 +268,15 @@ printf '%s\n' "$*" >> "$PAWXY_TEST_LOG/pm.args"
 if [ "${1:-}" = "check-permission" ]; then
   printf '%s\n' "${PAWXY_TEST_DUMP_PERMISSION:-granted}"
 elif [ "${1:-}" = "path" ] && [ "${2:-}" = "dev.pawxy" ]; then
-  if [ "${PAWXY_TEST_PM_PATH_MISSING:-0}" != "1" ]; then
+  if [ "${PAWXY_TEST_PM_PATH_MISSING:-0}" != "1" ] \
+    && { [ "${PAWXY_TEST_PACKAGE_ALREADY_INSTALLED:-0}" = "1" ] || [ -f "$PAWXY_TEST_LOG/pm-installed" ]; }; then
     printf '%s\n' "package:/data/app/dev.pawxy/base.apk"
   fi
+elif [ "${1:-}" = "install" ]; then
+  if [ "${PAWXY_TEST_PM_INSTALL_FAIL:-0}" = "1" ]; then
+    exit 43
+  fi
+  : > "$PAWXY_TEST_LOG/pm-installed"
 fi
 PM
 chmod 755 "$tmp/bin-local/pm"

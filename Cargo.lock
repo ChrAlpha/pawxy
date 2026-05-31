@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "pawxy-cli"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "pawxy-core",
  "tokio",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "pawxy-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "base64",
  "bytes",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "pawxy-jni"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "jni",
  "once_cell",

@@ -11,8 +11,8 @@ android {
         applicationId = "dev.pawxy"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.2.5"
+        versionCode = 8
+        versionName = "0.2.6"
     }
 
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")

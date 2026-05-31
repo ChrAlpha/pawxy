@@ -149,8 +149,12 @@ verify_android_shell_permissions() {
   fi
 }
 
+installed_package_path() {
+  pm path "$PKG" 2>/dev/null | awk '/^package:/ { print; exit }'
+}
+
 verify_package_installed() {
-  package_path=$(pm path "$PKG" 2>/dev/null | awk '/^package:/ { print; exit }')
+  package_path=$(installed_package_path)
   [ -n "$package_path" ] \
     || die "Pawxy package $PKG was not visible after install; pm path returned empty"
 }
@@ -340,8 +344,14 @@ fetch_asset "$CTL" "$work/$CTL"
 
 info "verifying release assets"
 verify_checksums
-info "installing $APK"
-run_step "pm install" pm install -r "$work/$APK"
+package_path=$(installed_package_path)
+if [ -n "$package_path" ]; then
+  info "Pawxy package already installed; skipping APK install: $package_path"
+else
+  warn "if Shizuku exits during APK install, restart Shizuku and rerun this installer; it will continue when the package install completed."
+  info "installing $APK"
+  run_step "pm install" pm install -r "$work/$APK"
+fi
 verify_package_installed
 pm grant "$PKG" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
 info "installing pawxyctl to $INSTALL_DIR/$CTL"

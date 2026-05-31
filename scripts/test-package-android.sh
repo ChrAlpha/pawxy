@@ -74,7 +74,12 @@ case "${1:-}" in
     printf '%s\n' "granted"
     ;;
   path)
-    printf '%s\n' "package:/data/app/dev.pawxy/base.apk"
+    if [ -f "$PAWXY_TEST_LOG/pm-installed" ]; then
+      printf '%s\n' "package:/data/app/dev.pawxy/base.apk"
+    fi
+    ;;
+  install)
+    : > "$PAWXY_TEST_LOG/pm-installed"
     ;;
 esac
 PM
