@@ -28,6 +28,10 @@ die() {
   exit 1
 }
 
+warn() {
+  printf '%s\n' "pawxy install: warning: $*" >&2
+}
+
 has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -76,7 +80,7 @@ shell_dump_permission() {
     [ -z "$fallback" ] || result=$fallback
   fi
 
-  printf '%s\n' "$result"
+  printf '%s\n' "unknown"
 }
 
 verify_android_shell_permissions() {
@@ -94,8 +98,11 @@ verify_android_shell_permissions() {
     case "$dump_permission" in
       granted*)
         ;;
+      denied*)
+        die "com.android.shell lacks android.permission.DUMP: $dump_permission. Run through adb shell or Shizuku/rish."
+        ;;
       *)
-        die "com.android.shell lacks android.permission.DUMP: ${dump_permission:-unknown}. Run through adb shell or Shizuku/rish."
+        warn "could not verify com.android.shell android.permission.DUMP; continuing and relying on startup verification."
         ;;
     esac
   fi

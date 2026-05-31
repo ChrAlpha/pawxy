@@ -14,7 +14,7 @@ sh -n "$SCRIPT"
 
 tmp=${TMPDIR:-/tmp}/pawxy-install-test.$$
 rm -rf "$tmp"
-mkdir -p "$tmp/bin" "$tmp/bin-local" "$tmp/log" "$tmp/log-api" "$tmp/log-local" "$tmp/log-pm-check-fallback" "$tmp/log-delayed-start" "$tmp/log-status-failure" "$tmp/log-native-status-failure" "$tmp/log-start-failure" "$tmp/log-status-error" "$tmp/log-last-error" "$tmp/log-bad-shell-uid" "$tmp/log-dump-denied" "$tmp/log-package-missing" "$tmp/release" "$tmp/install" "$tmp/install-api" "$tmp/install-local" "$tmp/install-pm-check-fallback" "$tmp/install-delayed-start" "$tmp/install-status-failure" "$tmp/install-native-status-failure" "$tmp/install-start-failure" "$tmp/install-status-error" "$tmp/install-last-error" "$tmp/install-bad-shell-uid" "$tmp/install-dump-denied" "$tmp/install-package-missing" "$tmp/tmp"
+mkdir -p "$tmp/bin" "$tmp/bin-local" "$tmp/log" "$tmp/log-api" "$tmp/log-local" "$tmp/log-pm-check-fallback" "$tmp/log-pm-check-unknown" "$tmp/log-delayed-start" "$tmp/log-status-failure" "$tmp/log-native-status-failure" "$tmp/log-start-failure" "$tmp/log-status-error" "$tmp/log-last-error" "$tmp/log-bad-shell-uid" "$tmp/log-dump-denied" "$tmp/log-package-missing" "$tmp/release" "$tmp/install" "$tmp/install-api" "$tmp/install-local" "$tmp/install-pm-check-fallback" "$tmp/install-pm-check-unknown" "$tmp/install-delayed-start" "$tmp/install-status-failure" "$tmp/install-native-status-failure" "$tmp/install-start-failure" "$tmp/install-status-error" "$tmp/install-last-error" "$tmp/install-bad-shell-uid" "$tmp/install-dump-denied" "$tmp/install-package-missing" "$tmp/tmp"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 printf 'fake apk\n' > "$tmp/release/pawxy-0.1.0-debug.apk"
@@ -127,6 +127,10 @@ cat > "$tmp/bin/cmd" <<'CMD'
 #!/bin/sh
 printf '%s\n' "$*" >> "$PAWXY_TEST_LOG/cmd.args"
 if [ "${1:-}" = "package" ] && [ "${2:-}" = "check-permission" ]; then
+  if [ "${PAWXY_TEST_CMD_CHECK_PERMISSION_UNKNOWN:-0}" = "1" ]; then
+    printf '%s\n' "Unknown command: check-permission"
+    exit 1
+  fi
   printf '%s\n' "${PAWXY_TEST_CMD_DUMP_PERMISSION:-granted}"
 fi
 CMD
@@ -201,6 +205,25 @@ grep -F -- "package check-permission android.permission.DUMP com.android.shell" 
 grep -Fx -- "start" "$tmp/log-pm-check-fallback/pawxyctl.args" >/dev/null \
   || fail "installer must continue after cmd package reports shell DUMP permission"
 [ -x "$tmp/install-pm-check-fallback/pawxyctl" ] || fail "pm-check fallback installer must install executable pawxyctl"
+
+PATH="$tmp/bin:$PATH" \
+PAWXY_VERSION=0.1.0 \
+PAWXY_INSTALL_DIR="$tmp/install-pm-check-unknown" \
+PAWXY_TEST_RELEASE="$tmp/release" \
+PAWXY_TEST_RELEASE_JSON="$tmp/release.json" \
+PAWXY_TEST_LOG="$tmp/log-pm-check-unknown" \
+PAWXY_TEST_PM_CHECK_PERMISSION_UNKNOWN=1 \
+PAWXY_TEST_CMD_CHECK_PERMISSION_UNKNOWN=1 \
+TMPDIR="$tmp/tmp" \
+  sh "$SCRIPT" >/dev/null
+
+grep -F -- "check-permission android.permission.DUMP com.android.shell" "$tmp/log-pm-check-unknown/pm.args" >/dev/null \
+  || fail "installer must try pm check-permission before treating permission status as unknown"
+grep -F -- "package check-permission android.permission.DUMP com.android.shell" "$tmp/log-pm-check-unknown/cmd.args" >/dev/null \
+  || fail "installer must try cmd package check-permission before treating permission status as unknown"
+grep -Fx -- "start" "$tmp/log-pm-check-unknown/pawxyctl.args" >/dev/null \
+  || fail "installer must continue when shell DUMP permission cannot be checked"
+[ -x "$tmp/install-pm-check-unknown/pawxyctl" ] || fail "pm-check unknown installer must install executable pawxyctl"
 
 cat > "$tmp/bin-local/curl" <<'CURL'
 #!/bin/sh
