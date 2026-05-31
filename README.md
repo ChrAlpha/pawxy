@@ -33,13 +33,6 @@ Install and start on Android in one command:
 curl -fsSL https://github.com/ChrAlpha/pawxy/releases/latest/download/install-android.sh | sh
 ```
 
-For this private repository, pass a GitHub token for both the script download
-and release asset downloads:
-
-```sh
-curl -fsSL -H "Authorization: Bearer $GITHUB_PERSONAL_ACCESS_TOKEN" https://raw.githubusercontent.com/ChrAlpha/pawxy/main/scripts/install-android.sh | PAWXY_GITHUB_TOKEN="$GITHUB_PERSONAL_ACCESS_TOKEN" sh
-```
-
 Shizuku/rish behaves like adb shell, not a full Unix or Termux userland. If the
 remote Shizuku shell has `curl` or `wget`, install through rish directly:
 
@@ -77,8 +70,15 @@ pawxyctl wake on
 pawxyctl stop
 ```
 
-From Shizuku/rish, keep the control token in the same stable location used by
-adb shell:
+From adb shell, keep the control token in a stable shared location:
+
+```sh
+adb shell 'PAWXY_HOME=/data/local/tmp/pawxy /data/local/tmp/pawxyctl start'
+adb shell 'PAWXY_HOME=/data/local/tmp/pawxy /data/local/tmp/pawxyctl status --json'
+adb shell 'PAWXY_HOME=/data/local/tmp/pawxy /data/local/tmp/pawxyctl share on'
+```
+
+From Shizuku/rish, use the same control-token location:
 
 ```sh
 rish -c 'PAWXY_HOME=/data/local/tmp/pawxy /data/local/tmp/pawxyctl start'
