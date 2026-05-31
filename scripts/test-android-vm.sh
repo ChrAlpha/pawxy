@@ -14,6 +14,7 @@ EMULATOR_TIMEOUT_SECONDS=${PAWXY_VM_EMULATOR_TIMEOUT_SECONDS:-30}
 VM_HOLD_SECONDS=${PAWXY_VM_HOLD_SECONDS:-300}
 VM_HOLD_INTERVAL_SECONDS=${PAWXY_VM_HOLD_INTERVAL_SECONDS:-30}
 EMULATOR_ACCEL=${PAWXY_EMULATOR_ACCEL:-}
+KVM_DEVICE=${PAWXY_VM_KVM_DEVICE:-/dev/kvm}
 NO_SNAPSHOT=${PAWXY_VM_NO_SNAPSHOT:-1}
 WIPE_DATA=${PAWXY_VM_WIPE_DATA:-0}
 EMULATOR_LOG=${PAWXY_VM_EMULATOR_LOG:-}
@@ -197,10 +198,10 @@ print_runtime_inventory() {
     note "runtime inventory: emulator binary not found: $EMULATOR"
   fi
 
-  if [ -e /dev/kvm ]; then
-    note "runtime inventory: /dev/kvm is available"
+  if [ -e "$KVM_DEVICE" ]; then
+    note "runtime inventory: $KVM_DEVICE is available"
   else
-    note "runtime inventory: /dev/kvm is unavailable; AVD launch will use software acceleration unless PAWXY_EMULATOR_ACCEL is set"
+    note "runtime inventory: $KVM_DEVICE is unavailable; AVD launch will use software acceleration unless PAWXY_EMULATOR_ACCEL is set"
   fi
 
   if [ -n "$GSI_SYSTEM_IMG" ]; then
@@ -228,8 +229,8 @@ print_runtime_setup_hint() {
   note "runtime setup hint: PAWXY_AVD=pawxy-api35 PAWXY_GSI_SYSTEM_IMG=/path/to/system.img scripts/test-android-vm.sh"
   note "runtime setup hint: for Android Emulator, use an extracted x86_64 GSI system.img that matches the AVD ABI; for Pixel hardware, boot an ARM64 GSI/DSU runtime and rerun with ANDROID_SERIAL"
   note "runtime setup hint: Pixel + Shizuku/rish: ANDROID_SERIAL=<pixel_serial> PAWXY_CONTROL_MODE=rish PAWXY_RISH=/sdcard/Android/data/moe.shizuku.privileged.api/files/rish PAWXY_RISH_RUNNER=sh PAWXY_RISH_APPLICATION_ID=<authorized_package> scripts/test-public-readiness.sh"
-  if [ ! -e /dev/kvm ]; then
-    note "runtime setup hint: /dev/kvm is unavailable here; emulator launch will use PAWXY_EMULATOR_ACCEL=off and may be slow"
+  if [ ! -e "$KVM_DEVICE" ]; then
+    note "runtime setup hint: $KVM_DEVICE is unavailable here; emulator launch will use PAWXY_EMULATOR_ACCEL=off and may be slow"
   fi
 }
 
@@ -393,7 +394,7 @@ launch_avd_if_requested() {
   resolve_gsi_system_img
   check_gsi_avd_arch_compat
 
-  if [ -z "$EMULATOR_ACCEL" ] && [ ! -e /dev/kvm ]; then
+  if [ -z "$EMULATOR_ACCEL" ] && [ ! -e "$KVM_DEVICE" ]; then
     EMULATOR_ACCEL=off
   fi
 

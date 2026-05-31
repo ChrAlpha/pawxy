@@ -14,7 +14,7 @@ sh -n "$SCRIPT"
 
 tmp=${TMPDIR:-/tmp}/pawxy-android-vm-smoke-test.$$
 rm -rf "$tmp"
-mkdir -p "$tmp/bin" "$tmp/bin-no-emulator" "$tmp/android-home/emulator" "$tmp/android-home/cmdline-tools/latest/bin" "$tmp/log-existing" "$tmp/log-existing-gsi-serial" "$tmp/log-avd" "$tmp/log-avd-wipe-data" "$tmp/log-avd-exits" "$tmp/log-avd-with-serial" "$tmp/log-missing-avd" "$tmp/log-avd-with-existing-device" "$tmp/log-avd-delayed-registration" "$tmp/log-sdk-emulator" "$tmp/log-sdk-tools" "$tmp/log-gsi" "$tmp/log-gsi-arch-match" "$tmp/log-gsi-arch-mismatch" "$tmp/log-gsi-dir" "$tmp/log-gsi-dir-missing" "$tmp/log-gsi-zip" "$tmp/log-missing-gsi" "$tmp/log-no-runtime" "$tmp/log-boot-timeout" "$tmp/log-invalid-adb-timeout" "$tmp/log-invalid-emulator-timeout" "$tmp/log-invalid-vm-flag"
+mkdir -p "$tmp/bin" "$tmp/bin-no-emulator" "$tmp/android-home/emulator" "$tmp/android-home/cmdline-tools/latest/bin" "$tmp/log-existing" "$tmp/log-existing-gsi-serial" "$tmp/log-avd" "$tmp/log-avd-kvm" "$tmp/log-avd-wipe-data" "$tmp/log-avd-exits" "$tmp/log-avd-with-serial" "$tmp/log-missing-avd" "$tmp/log-avd-with-existing-device" "$tmp/log-avd-delayed-registration" "$tmp/log-sdk-emulator" "$tmp/log-sdk-tools" "$tmp/log-gsi" "$tmp/log-gsi-arch-match" "$tmp/log-gsi-arch-mismatch" "$tmp/log-gsi-dir" "$tmp/log-gsi-dir-missing" "$tmp/log-gsi-zip" "$tmp/log-missing-gsi" "$tmp/log-no-runtime" "$tmp/log-boot-timeout" "$tmp/log-invalid-adb-timeout" "$tmp/log-invalid-emulator-timeout" "$tmp/log-invalid-vm-flag"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 cat > "$tmp/bin/adb" <<'ADB'
@@ -424,6 +424,7 @@ PATH="$tmp/bin:$PATH" \
   PAWXY_DEVICE_SMOKE="$tmp/bin/test-android-device.sh" \
   PAWXY_TEST_LOG="$tmp/log-avd" \
   PAWXY_VM_EMULATOR_LOG="$tmp/log-avd/emulator-output.log" \
+  PAWXY_VM_KVM_DEVICE="$tmp/missing-kvm" \
   PAWXY_TEST_REQUIRE_WAIT_BEFORE_DEVICES=1 \
   PAWXY_AVD=pawxy-api35 \
   PAWXY_VM_BOOT_TIMEOUT_SECONDS=5 \
@@ -444,6 +445,22 @@ grep -F -- "fake emulator output:" "$tmp/log-avd/emulator-output.log" >/dev/null
   || fail "VM smoke must capture emulator stdout and stderr in PAWXY_VM_EMULATOR_LOG"
 grep -F -- "emu kill" "$tmp/log-avd/adb.log" >/dev/null \
   || fail "VM smoke must stop a launched emulator during cleanup"
+
+printf '%s\n' "fake kvm" > "$tmp/fake-kvm"
+PATH="$tmp/bin:$PATH" \
+  ADB="$tmp/bin/adb" \
+  PAWXY_DEVICE_SMOKE="$tmp/bin/test-android-device.sh" \
+  PAWXY_TEST_LOG="$tmp/log-avd-kvm" \
+  PAWXY_VM_KVM_DEVICE="$tmp/fake-kvm" \
+  PAWXY_TEST_REQUIRE_WAIT_BEFORE_DEVICES=1 \
+  PAWXY_AVD=pawxy-api35 \
+  PAWXY_VM_BOOT_TIMEOUT_SECONDS=5 \
+  PAWXY_VM_BOOT_INTERVAL_SECONDS=0 \
+  sh "$SCRIPT" >/dev/null
+
+if grep -F -- "-accel off" "$tmp/log-avd-kvm/emulator.log" >/dev/null; then
+  fail "VM smoke must not force software acceleration when the configured KVM device is available"
+fi
 
 PATH="$tmp/bin:$PATH" \
   ADB="$tmp/bin/adb" \
