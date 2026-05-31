@@ -56,6 +56,29 @@ require_non_negative_int() {
   esac
 }
 
+shell_dump_permission() {
+  result=$(pm check-permission android.permission.DUMP com.android.shell 2>/dev/null || true)
+  case "$result" in
+    granted*|denied*)
+      printf '%s\n' "$result"
+      return
+      ;;
+  esac
+
+  if has_cmd cmd; then
+    fallback=$(cmd package check-permission android.permission.DUMP com.android.shell 2>/dev/null || true)
+    case "$fallback" in
+      granted*|denied*)
+        printf '%s\n' "$fallback"
+        return
+        ;;
+    esac
+    [ -z "$fallback" ] || result=$fallback
+  fi
+
+  printf '%s\n' "$result"
+}
+
 verify_android_shell_permissions() {
   uid=$(id -u 2>/dev/null || true)
   case "$uid" in
@@ -67,7 +90,7 @@ verify_android_shell_permissions() {
   esac
 
   if [ "$uid" = "2000" ]; then
-    dump_permission=$(pm check-permission android.permission.DUMP com.android.shell 2>/dev/null || true)
+    dump_permission=$(shell_dump_permission)
     case "$dump_permission" in
       granted*)
         ;;
